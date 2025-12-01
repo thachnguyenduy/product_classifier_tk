@@ -9,6 +9,8 @@ ultralytics>=8.0.0
 # Hardware (optional - only for Raspberry Pi)
 pyserial>=3.5
 
-# Note: RPi.GPIO is pre-installed on Raspberry Pi OS
-# On Windows/Mac, the app will run without GPIO functionality
+# Note for Raspberry Pi:
+# - picamera2 is pre-installed on Raspberry Pi OS (Bullseye or later)
+# - If not installed: sudo apt install -y python3-picamera2
+# - On Windows/Mac, the app will run without picamera2
 
