@@ -1,182 +1,148 @@
-"""Threaded camera capture for Tkinter UI."""
-from __future__ import annotations
-
+"""USB Camera streaming module."""
+import cv2
+import os
 import threading
 import time
-from typing import Optional, Tuple
-
-import cv2
-import numpy as np
-
-# Try to import picamera2 (for Raspberry Pi Camera Module)
-try:
-    from picamera2 import Picamera2
-    PICAMERA2_AVAILABLE = True
-    print("✅ picamera2 available")
-except ImportError:
-    PICAMERA2_AVAILABLE = False
-    Picamera2 = None
-    print("⚠️ picamera2 not available, using OpenCV")
 
 
 class CameraStreamer:
-    """Continuously reads frames from an attached camera in a background thread."""
-
-    def __init__(self, camera_index: int = 0) -> None:
+    """USB Camera streamer with auto-reconnect."""
+    
+    def __init__(self, camera_index=0, width=640, height=480):
         self.camera_index = camera_index
-        self.capture: Optional[cv2.VideoCapture] = None
-        self.picam2: Optional[Picamera2] = None
-        self.use_picamera2 = PICAMERA2_AVAILABLE
+        self.width = width
+        self.height = height
+
+        self.capture = None
         self.running = False
+        self.thread = None
+
         self.frame_lock = threading.Lock()
         self.latest_frame = None
-        self.thread: Optional[threading.Thread] = None
-        self._last_timestamp = time.time()
-        self._fps = 0.0
 
-    def start(self) -> bool:
-        """Open the camera and begin background capture."""
+        self._last_time = time.time()
+        self._fps = 0
+
+    def _open_camera(self):
+        """Open USB camera with platform-specific backend."""
+        try:
+            # Windows: DSHOW, Linux/Pi: V4L2
+            if os.name == 'nt':
+                backend = cv2.CAP_DSHOW
+                print(f"[Camera] Using DSHOW backend (Windows)")
+            else:
+                backend = cv2.CAP_V4L2
+                print(f"[Camera] Using V4L2 backend (Linux/Pi)")
+            
+            cap = cv2.VideoCapture(self.camera_index, backend)
+
+            # Fallback to default if failed
+            if not cap.isOpened():
+                print(f"[Camera] Backend failed, trying default...")
+                cap = cv2.VideoCapture(self.camera_index)
+
+            if not cap.isOpened():
+                print(f"[Camera] Failed to open camera {self.camera_index}")
+                return None
+
+            # Set resolution
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
+            cap.set(cv2.CAP_PROP_FPS, 30)
+            
+            # Verify with test read
+            ret, frame = cap.read()
+            if ret and frame is not None:
+                actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                print(f"[Camera] ✅ Opened camera {self.camera_index} ({actual_w}x{actual_h})")
+                return cap
+            else:
+                print(f"[Camera] Camera opened but cannot read frame")
+                cap.release()
+                return None
+
+        except Exception as e:
+            print(f"[Camera] Error: {e}")
+            return None
+
+    def start(self):
+        """Start camera streaming."""
         if self.running:
             return True
 
-        print("🎥 Opening camera...")
-        
-        # Method 1: Try picamera2 first (for Raspberry Pi Camera Module)
-        if self.use_picamera2:
-            print("  Trying picamera2...")
-            try:
-                self.picam2 = Picamera2()
-                
-                # Simple configuration
-                config = self.picam2.create_preview_configuration(
-                    main={"size": (1280, 720), "format": "RGB888"}
-                )
-                self.picam2.configure(config)
-                self.picam2.start()
-                
-                # Warm up
-                time.sleep(2)
-                
-                # Test capture
-                frame = self.picam2.capture_array()
-                if frame is not None and frame.size > 0:
-                    print(f"  ✅ picamera2 OK! Shape: {frame.shape}")
-                    self.running = True
-                    self.thread = threading.Thread(target=self._capture_loop_picamera2, daemon=True)
-                    self.thread.start()
-                    return True
-                else:
-                    print("  ❌ picamera2 no frame")
-                    self.picam2.stop()
-                    self.picam2 = None
-                    
-            except Exception as e:
-                print(f"  ❌ picamera2 error: {e}")
-                if self.picam2:
-                    try:
-                        self.picam2.stop()
-                    except:
-                        pass
-                    self.picam2 = None
-        
-        # Method 2: Fallback to OpenCV
-        print("  Trying OpenCV...")
-        self.capture = cv2.VideoCapture(self.camera_index)
-        
-        if not self.capture.isOpened():
-            print("  ❌ OpenCV failed")
+        self.capture = self._open_camera()
+        if self.capture is None:
             return False
-        
-        # Set resolution
-        self.capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        self.capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-        
-        # Test read
-        ret, frame = self.capture.read()
-        if not ret or frame is None:
-            print("  ❌ OpenCV cannot read frame")
-            self.capture.release()
-            self.capture = None
-            return False
-        
-        print(f"  ✅ OpenCV OK! Shape: {frame.shape}")
+
         self.running = True
-        self.thread = threading.Thread(target=self._capture_loop, daemon=True)
+        self.thread = threading.Thread(target=self._loop, daemon=True)
         self.thread.start()
+        print("[Camera] Streaming started.")
         return True
 
-    def _capture_loop_picamera2(self) -> None:
-        """Capture loop for picamera2."""
-        print("📹 picamera2 capture loop started")
-        while self.running and self.picam2 is not None:
-            try:
-                # Capture frame (RGB format)
-                frame = self.picam2.capture_array()
-                
-                if frame is not None and frame.size > 0:
-                    # Convert RGB to BGR for OpenCV compatibility
-                    frame_bgr = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-                    
-                    with self.frame_lock:
-                        self.latest_frame = frame_bgr
-                    
-                    # Calculate FPS
-                    now = time.time()
-                    dt = now - self._last_timestamp
-                    if dt > 0:
-                        self._fps = 1.0 / dt
-                    self._last_timestamp = now
-                    
-            except Exception as e:
-                print(f"⚠️ Capture error: {e}")
-                time.sleep(0.05)
+    def _loop(self):
+        """Main capture loop with auto-reconnect."""
+        reconnect_delay = 0.5
         
-        print("📹 picamera2 capture loop stopped")
-        self._release_capture()
-
-    def _capture_loop(self) -> None:
-        """Continuously read frames while running is True (OpenCV)."""
-        print("📹 OpenCV capture loop started")
-        while self.running and self.capture is not None:
-            ret, frame = self.capture.read()
-            if not ret or frame is None:
-                time.sleep(0.05)
+        while self.running:
+            # Check if capture is valid
+            if self.capture is None:
+                print("[Camera] Reconnecting...")
+                time.sleep(reconnect_delay)
+                self.capture = self._open_camera()
                 continue
 
+            # Read frame
+            ret, frame = self.capture.read()
+
+            if not ret or frame is None:
+                print("[Camera] Frame read failed, reconnecting...")
+                try:
+                    self.capture.release()
+                except:
+                    pass
+                self.capture = None
+                time.sleep(reconnect_delay)
+                continue
+
+            # Store frame
             with self.frame_lock:
                 self.latest_frame = frame
 
             # Calculate FPS
             now = time.time()
-            dt = now - self._last_timestamp
+            dt = now - self._last_time
             if dt > 0:
                 self._fps = 1.0 / dt
-            self._last_timestamp = now
+            self._last_time = now
 
-        print("📹 OpenCV capture loop stopped")
-        self._release_capture()
+            # Small delay to reduce CPU usage
+            time.sleep(0.001)
 
-    def get_frame(self) -> Tuple[Optional[any], float]:
-        """Return the latest frame and FPS estimate."""
+    def get_frame(self):
+        """Get the latest frame and FPS."""
         with self.frame_lock:
-            frame = None if self.latest_frame is None else self.latest_frame.copy()
-        return frame, self._fps
+            if self.latest_frame is None:
+                return None, 0
+            return self.latest_frame.copy(), self._fps
 
-    def stop(self) -> None:
-        """Stop streaming and free camera resources."""
+    def stop(self):
+        """Stop camera streaming."""
+        print("[Camera] Stopping...")
         self.running = False
+        
+        # Wait for thread to finish
         if self.thread and self.thread.is_alive():
             self.thread.join(timeout=1.0)
-        self._release_capture()
 
-    def _release_capture(self) -> None:
-        if self.capture is not None:
-            self.capture.release()
-            self.capture = None
-        if self.picam2 is not None:
+        # Release camera
+        if self.capture:
             try:
-                self.picam2.stop()
+                self.capture.release()
             except:
                 pass
-            self.picam2 = None
+            self.capture = None
 
+        self.latest_frame = None
+        print("[Camera] ✅ Stopped.")
