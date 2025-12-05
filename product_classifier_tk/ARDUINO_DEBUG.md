@@ -125,9 +125,28 @@ groups
 
 ---
 
-### Bước 5: Test Arduino Manual
+### Bước 5: Test Arduino Tự Động
 
-**Python test script:**
+**Chạy test script:**
+
+```bash
+# Test connection only (không chạy hardware)
+python3 test_arduino_connection.py
+
+# Test connection + hardware (băng chuyền chạy 2s)
+python3 test_arduino_connection.py --hardware
+```
+
+**⚠️ Lưu ý:** Flag `--hardware` sẽ:
+- Chạy băng chuyền 2 giây
+- Test servo gạt
+- Cần đảm bảo an toàn trước khi chạy!
+
+---
+
+### Bước 6: Test Arduino Manual (Advanced)
+
+**Python test script thủ công:**
 
 ```python
 # test_arduino_manual.py

@@ -123,16 +123,29 @@ Welcome! This index helps you quickly find the information you need.
 ## 🧪 Testing & Demo
 
 ### Component Testing
+
+**[TESTING_GUIDE.md](TESTING_GUIDE.md)** 📘 **COMPLETE TESTING GUIDE**
+- All test scripts explained
+- When to use each test
+- Expected outputs
+- Troubleshooting
+
 **[test_system_components.py](test_system_components.py)** 🧪
-- Test dependencies
-- Test camera
-- Test Arduino serial
-- Test model loading
+- Test ALL components at once
+- Dependencies, camera, Arduino, model
+- Run: `python3 test_system_components.py`
+
+**[test_arduino_connection.py](test_arduino_connection.py)** 🔌
+- Detailed Arduino connection test
+- Run: `python3 test_arduino_connection.py`
+- Hardware test: `python3 test_arduino_connection.py --hardware`
+  - ⚠️ Will run conveyor for 2 seconds!
 
 **When to run:**
 - Before first use
 - After system changes
-- Troubleshooting setup
+- When "SIMULATION MODE" appears
+- Troubleshooting Arduino
 
 ### Voting Mechanism Demo
 **[demo_voting_mechanism.py](demo_voting_mechanism.py)** 🗳️

@@ -68,7 +68,14 @@ pip3 install -r requirements.txt
 ### Bước 3: Kiểm Tra Hệ Thống
 
 ```bash
+# Test tất cả components
 python3 test_system_components.py
+
+# Test Arduino connection
+python3 test_arduino_connection.py
+
+# Test Arduino + Hardware (băng chuyền chạy 2s)
+python3 test_arduino_connection.py --hardware
 ```
 
 ### Bước 4: Hiệu Chỉnh (QUAN TRỌNG!)

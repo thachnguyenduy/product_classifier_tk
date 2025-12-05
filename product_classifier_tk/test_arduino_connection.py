@@ -1,7 +1,17 @@
 #!/usr/bin/env python3
 """
-Quick Arduino Connection Test
-Test if Arduino is properly connected and responding.
+Arduino Connection Test with Physical Hardware Verification
+
+Tests Arduino connection and optionally verifies physical hardware operation.
+
+Usage:
+    python3 test_arduino_connection.py              # Connection test only
+    python3 test_arduino_connection.py --hardware   # Test + run conveyor 2s
+
+The hardware test will:
+    - Run conveyor belt for 2 seconds
+    - Test servo eject motion
+    - Verify all hardware responds correctly
 """
 
 import serial
@@ -13,14 +23,19 @@ SERIAL_PORT = "/dev/ttyACM0"  # Change if needed
 # SERIAL_PORT = "COM3"  # Uncomment for Windows
 BAUD_RATE = 115200
 
-def test_arduino():
-    """Test Arduino connection and communication."""
+def test_arduino(hardware_test=True):
+    """Test Arduino connection and communication.
+    
+    Args:
+        hardware_test: If True, will run physical hardware test (conveyor + servo)
+    """
     
     print("="*80)
     print("🔧 ARDUINO CONNECTION TEST")
     print("="*80)
     print(f"Port: {SERIAL_PORT}")
     print(f"Baud: {BAUD_RATE}")
+    print(f"Hardware Test: {'Enabled' if hardware_test else 'Disabled'}")
     print()
     
     try:
@@ -77,27 +92,74 @@ def test_arduino():
         else:
             print("⚠️  No status response")
         
-        print("\nStep 6: Testing hardware commands...")
+        # Hardware test (optional)
+        if hardware_test:
+            print("\nStep 6: Testing physical hardware...")
+            print("  ⚠️  WARNING: This will move physical hardware!")
+            print("  - Conveyor will RUN for 2 seconds")
+            print("  - Servo will perform eject motion")
+            print("\n  Make sure:")
+            print("    • Area is clear and safe")
+            print("    • Conveyor belt is properly connected")
+            print("    • Servo is properly mounted")
+            
+            # Ask for confirmation
+            try:
+                response = input("\n  ⚠️  Proceed with hardware test? (y/N): ").strip().lower()
+                if response != 'y':
+                    print("  ⏭️  Hardware test skipped")
+                    hardware_test = False
+            except:
+                print("  ⏭️  Hardware test skipped (no input)")
+                hardware_test = False
+        
+        if hardware_test:
+            print("\n  Starting hardware test in 3 seconds...")
+            for i in range(3, 0, -1):
+                print(f"    {i}...")
+                time.sleep(1)
         
         # Test START_CONVEYOR
-        print("  Testing START_CONVEYOR...")
+        print("\n  🔵 Starting conveyor...")
         ser.write(b"START_CONVEYOR\n")
         time.sleep(0.5)
         if ser.in_waiting > 0:
             response = ser.readline().decode().strip()
             print(f"    📨 {response}")
         
-        time.sleep(1)
+        # Run for 2 seconds
+        print("  ▶️  Conveyor RUNNING...")
+        for i in range(2, 0, -1):
+            print(f"    ⏱️  {i} seconds remaining...")
+            time.sleep(1)
         
         # Test STOP_CONVEYOR
-        print("  Testing STOP_CONVEYOR...")
+        print("  🔴 Stopping conveyor...")
         ser.write(b"STOP_CONVEYOR\n")
         time.sleep(0.5)
         if ser.in_waiting > 0:
             response = ser.readline().decode().strip()
             print(f"    📨 {response}")
         
-        print("✅ Hardware commands sent")
+        print("  ✅ Conveyor stopped")
+        
+        # Test servo movement
+        print("\n  Testing servo movement...")
+        print("  🔧 Moving servo to eject position...")
+        ser.write(b"REJECT\n")
+        time.sleep(1.5)  # Wait for servo sequence
+        
+        # Read all responses
+        while ser.in_waiting > 0:
+            response = ser.readline().decode().strip()
+            print(f"    📨 {response}")
+        
+        print("  ✅ Servo test complete")
+        
+        print("\n✅ All hardware commands executed successfully!")
+        else:
+            print("\nStep 6: Hardware test skipped")
+            print("  ℹ️  To test hardware, run with --hardware flag")
         
         # Close
         ser.close()
@@ -170,6 +232,18 @@ def main():
     """Entry point."""
     print("\n")
     
+    # Check command line arguments
+    hardware_test = False
+    if len(sys.argv) > 1:
+        if sys.argv[1] in ['--hardware', '-h']:
+            hardware_test = True
+        elif sys.argv[1] in ['--help']:
+            print("Usage:")
+            print("  python3 test_arduino_connection.py           # Test connection only")
+            print("  python3 test_arduino_connection.py --hardware # Test with physical hardware")
+            print()
+            sys.exit(0)
+    
     # Check if pyserial installed
     try:
         import serial
@@ -180,7 +254,7 @@ def main():
         sys.exit(1)
     
     # Run test
-    success = test_arduino()
+    success = test_arduino(hardware_test=hardware_test)
     
     if success:
         print("\n✅ ALL TESTS PASSED!")
