@@ -122,12 +122,28 @@ class ArduinoController:
         """Establish serial connection with Arduino."""
         try:
             self.serial_conn = serial.Serial(self.port, self.baud, timeout=Config.SERIAL_TIMEOUT)
-            time.sleep(2.5)
-            while self.serial_conn.in_waiting > 0:
-                line = self.serial_conn.readline().decode().strip()
-                print(f"[Arduino] {line}")
-            print(f"✅ Connected to Arduino at {self.port}")
-            print(f"🔌 Hardware control: ENABLED")
+            print(f"⏳ Waiting for Arduino to boot (3.5s)...")
+            time.sleep(3.5)  # Wait longer for Arduino to boot and send startup
+            
+            # Read startup messages
+            startup_found = False
+            start_time = time.time()
+            while (time.time() - start_time) < 5:  # Read for 5 seconds
+                if self.serial_conn.in_waiting > 0:
+                    line = self.serial_conn.readline().decode().strip()
+                    if line:
+                        print(f"[Arduino] {line}")
+                        if "Arduino" in line or "Ready" in line:
+                            startup_found = True
+                time.sleep(0.05)
+            
+            if startup_found:
+                print(f"✅ Connected to Arduino at {self.port}")
+                print(f"🔌 Hardware control: ENABLED")
+            else:
+                print(f"⚠️  Connected to {self.port} but no startup message")
+                print(f"   Arduino might be running but communication unclear")
+                print(f"🔌 Hardware control: ENABLED (with warnings)")
         except Exception as e:
             print(f"\n{'='*80}")
             print(f"❌ KHÔNG THỂ KẾT NỐI ARDUINO!")

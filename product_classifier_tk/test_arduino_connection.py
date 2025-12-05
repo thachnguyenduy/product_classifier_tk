@@ -43,18 +43,23 @@ def test_arduino(hardware_test=True):
         ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
         print("✅ Port opened successfully")
         
-        print("\nStep 2: Waiting for Arduino reset (2.5s)...")
-        time.sleep(2.5)
+        print("\nStep 2: Waiting for Arduino reset (3.5s)...")
+        print("  (Arduino needs time to boot and send startup messages)")
+        time.sleep(3.5)
         print("✅ Wait complete")
         
         print("\nStep 3: Reading startup messages...")
         startup_received = False
-        for _ in range(20):
+        # Read for 5 seconds to catch all startup messages
+        start_time = time.time()
+        while (time.time() - start_time) < 5:
             if ser.in_waiting > 0:
                 line = ser.readline().decode().strip()
-                print(f"  📨 {line}")
-                if "Arduino" in line or "Ready" in line:
-                    startup_received = True
+                if line:  # Only print non-empty lines
+                    print(f"  📨 {line}")
+                    if "Arduino" in line or "Ready" in line:
+                        startup_received = True
+            time.sleep(0.05)  # Small delay to avoid busy loop
         
         if startup_received:
             print("✅ Startup messages received")
