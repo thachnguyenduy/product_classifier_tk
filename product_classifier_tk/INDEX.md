@@ -173,10 +173,14 @@ Welcome! This index helps you quickly find the information you need.
 - Permission issues
 
 ### Arduino/Serial Issues
-📖 **[CONTINUOUS_FLOW_README.md](CONTINUOUS_FLOW_README.md)** → Troubleshooting → Problem 2
+📖 **[ARDUINO_DEBUG.md](ARDUINO_DEBUG.md)** 🔧 **DETAILED GUIDE**
+- Băng chuyền không chạy (SIMULATION MODE)
 - Port not found
 - Permission denied
 - No response
+- Step-by-step debugging
+
+🧪 **Quick test:** Run `python3 test_arduino_connection.py`
 
 ### Timing Issues
 📖 **[CALIBRATION_GUIDE.md](CALIBRATION_GUIDE.md)** → Troubleshooting Calibration

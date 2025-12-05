@@ -265,6 +265,9 @@ ls /dev/video*
 
 ### Arduino không kết nối
 
+**Triệu chứng:** Thấy log "SIMULATION MODE" hoặc "Băng chuyền KHÔNG chạy thật"
+
+**Giải pháp nhanh:**
 ```bash
 # Kiểm tra port
 ls /dev/ttyACM*
@@ -273,6 +276,8 @@ ls /dev/ttyACM*
 sudo usermod -a -G dialout $USER
 # Logout và login lại
 ```
+
+**Hướng dẫn chi tiết:** 👉 [ARDUINO_DEBUG.md](ARDUINO_DEBUG.md)
 
 ### Gạt không đúng thời điểm
 

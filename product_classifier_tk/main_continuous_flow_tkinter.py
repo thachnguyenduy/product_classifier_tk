@@ -127,8 +127,25 @@ class ArduinoController:
                 line = self.serial_conn.readline().decode().strip()
                 print(f"[Arduino] {line}")
             print(f"✅ Connected to Arduino at {self.port}")
+            print(f"🔌 Hardware control: ENABLED")
         except Exception as e:
-            print(f"❌ Failed to connect to Arduino: {e}")
+            print(f"\n{'='*80}")
+            print(f"❌ KHÔNG THỂ KẾT NỐI ARDUINO!")
+            print(f"{'='*80}")
+            print(f"Lỗi: {e}")
+            print(f"Port: {self.port}")
+            print(f"\n⚠️  HỆ THỐNG SẼ CHẠY Ở CHẾ ĐỘ SIMULATION (GIẢ LẬP)")
+            print(f"    - Băng chuyền KHÔNG chạy thật")
+            print(f"    - Servo KHÔNG gạt thật")
+            print(f"    - Chỉ hiển thị log để test")
+            print(f"\n🔧 Cách sửa:")
+            print(f"    1. Kiểm tra Arduino đã cắm USB chưa")
+            print(f"    2. Kiểm tra port đúng không: {self.port}")
+            print(f"       Linux/Pi: ls /dev/ttyACM* hoặc /dev/ttyUSB*")
+            print(f"       Windows: Check Device Manager")
+            print(f"    3. Đã upload firmware arduino/product_sorter.ino chưa?")
+            print(f"    4. Thêm quyền: sudo usermod -a -G dialout $USER")
+            print(f"{'='*80}\n")
             self.serial_conn = None
     
     def start_listening(self, detection_callback):
@@ -158,12 +175,13 @@ class ArduinoController:
     def send_command(self, command):
         """Send command to Arduino."""
         if not self.serial_conn:
-            print(f"[SIMULATED] Arduino command: {command}")
+            print(f"⚠️  [SIMULATION MODE] Command: {command}")
+            print(f"    → Băng chuyền KHÔNG chạy thật (Arduino chưa kết nối)")
             return False
         try:
             self.serial_conn.write(f"{command}\n".encode())
             if Config.DEBUG_MODE:
-                print(f"→ Sent to Arduino: {command}")
+                print(f"✅ Sent to Arduino: {command}")
             return True
         except Exception as e:
             print(f"❌ Failed to send command '{command}': {e}")
@@ -537,6 +555,22 @@ class BottleInspectionGUI(tk.Tk):
                  font=("Arial", 11), width=20, height=2,
                  bg="#FF6B6B", command=self._on_close).pack(padx=10, pady=5)
         
+        # Arduino Status
+        tk.Label(control_frame, text="", bg="#e8f4f8").pack(pady=5)  # Spacer
+        
+        if self.arduino.serial_conn:
+            status_text = "🔌 Arduino: KẾT NỐI"
+            status_color = "#90EE90"
+        else:
+            status_text = "⚠️ Arduino: SIMULATION"
+            status_color = "#FFB6C1"
+        
+        self.lbl_arduino_status = tk.Label(control_frame, text=status_text,
+                                          font=("Arial", 9, "bold"), 
+                                          bg=status_color, fg="black",
+                                          width=20, height=2, relief="solid")
+        self.lbl_arduino_status.pack(padx=10, pady=5)
+        
         # Statistics Section
         stats_frame = tk.LabelFrame(bottom_frame, text="📊 THỐNG KÊ",
                                    font=("Arial", 11, "bold"), bg="#e8f4f8")
@@ -591,6 +625,21 @@ class BottleInspectionGUI(tk.Tk):
     def _toggle_conveyor(self):
         """Toggle conveyor on/off."""
         if not self.conveyor_running:
+            # Check if Arduino connected
+            if not self.arduino.serial_conn:
+                messagebox.showwarning(
+                    "⚠️ Arduino Chưa Kết Nối",
+                    "Arduino chưa được kết nối!\n\n"
+                    "Hệ thống đang chạy ở CHẾ ĐỘ SIMULATION.\n"
+                    "Băng chuyền sẽ KHÔNG chạy thật.\n\n"
+                    "Kiểm tra:\n"
+                    "1. Arduino đã cắm USB?\n"
+                    "2. Port đúng không? (Config.SERIAL_PORT)\n"
+                    "3. Đã upload firmware?\n"
+                    "4. Có quyền truy cập port?\n\n"
+                    "Xem console để biết chi tiết."
+                )
+            
             self.arduino.start_conveyor()
             self.conveyor_running = True
             self.btn_conveyor.config(text="⏸️ DỪNG BĂNG CHUYỀN", bg="#FF6B6B")
