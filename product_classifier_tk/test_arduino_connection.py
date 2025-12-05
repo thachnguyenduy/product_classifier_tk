@@ -118,45 +118,45 @@ def test_arduino(hardware_test=True):
             for i in range(3, 0, -1):
                 print(f"    {i}...")
                 time.sleep(1)
-        
-        # Test START_CONVEYOR
-        print("\n  🔵 Starting conveyor...")
-        ser.write(b"START_CONVEYOR\n")
-        time.sleep(0.5)
-        if ser.in_waiting > 0:
-            response = ser.readline().decode().strip()
-            print(f"    📨 {response}")
-        
-        # Run for 2 seconds
-        print("  ▶️  Conveyor RUNNING...")
-        for i in range(2, 0, -1):
-            print(f"    ⏱️  {i} seconds remaining...")
-            time.sleep(1)
-        
-        # Test STOP_CONVEYOR
-        print("  🔴 Stopping conveyor...")
-        ser.write(b"STOP_CONVEYOR\n")
-        time.sleep(0.5)
-        if ser.in_waiting > 0:
-            response = ser.readline().decode().strip()
-            print(f"    📨 {response}")
-        
-        print("  ✅ Conveyor stopped")
-        
-        # Test servo movement
-        print("\n  Testing servo movement...")
-        print("  🔧 Moving servo to eject position...")
-        ser.write(b"REJECT\n")
-        time.sleep(1.5)  # Wait for servo sequence
-        
-        # Read all responses
-        while ser.in_waiting > 0:
-            response = ser.readline().decode().strip()
-            print(f"    📨 {response}")
-        
-        print("  ✅ Servo test complete")
-        
-        print("\n✅ All hardware commands executed successfully!")
+            
+            # Test START_CONVEYOR
+            print("\n  🔵 Starting conveyor...")
+            ser.write(b"START_CONVEYOR\n")
+            time.sleep(0.5)
+            if ser.in_waiting > 0:
+                response = ser.readline().decode().strip()
+                print(f"    📨 {response}")
+            
+            # Run for 2 seconds
+            print("  ▶️  Conveyor RUNNING...")
+            for i in range(2, 0, -1):
+                print(f"    ⏱️  {i} seconds remaining...")
+                time.sleep(1)
+            
+            # Test STOP_CONVEYOR
+            print("  🔴 Stopping conveyor...")
+            ser.write(b"STOP_CONVEYOR\n")
+            time.sleep(0.5)
+            if ser.in_waiting > 0:
+                response = ser.readline().decode().strip()
+                print(f"    📨 {response}")
+            
+            print("  ✅ Conveyor stopped")
+            
+            # Test servo movement
+            print("\n  Testing servo movement...")
+            print("  🔧 Moving servo to eject position...")
+            ser.write(b"REJECT\n")
+            time.sleep(1.5)  # Wait for servo sequence
+            
+            # Read all responses
+            while ser.in_waiting > 0:
+                response = ser.readline().decode().strip()
+                print(f"    📨 {response}")
+            
+            print("  ✅ Servo test complete")
+            
+            print("\n✅ All hardware commands executed successfully!")
         else:
             print("\nStep 6: Hardware test skipped")
             print("  ℹ️  To test hardware, run with --hardware flag")
