@@ -55,7 +55,7 @@ class Config:
     CAMERA_FPS = 30
     
     # =================== AI Model Configuration ===================
-    MODEL_PATH = "model/my_model.pt"
+    MODEL_PATH = "model/best_ncnn_model"
     CONFIDENCE_THRESHOLD = 0.5
     
     # ==================== Defect Class Names ======================
