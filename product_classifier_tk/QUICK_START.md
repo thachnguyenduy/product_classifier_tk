@@ -21,7 +21,7 @@ python3 test_system_components.py
 ```
 
 ### Step 4: Configure System
-Edit `main_continuous_flow.py`, tìm class `Config`:
+Edit `main_continuous_flow_tkinter.py`, tìm class `Config`:
 ```python
 SERIAL_PORT = "/dev/ttyACM0"  # Adjust if needed
 CAMERA_INDEX = 0              # Adjust if needed
@@ -30,10 +30,14 @@ PHYSICAL_DELAY = 2.0          # MUST CALIBRATE!
 
 ### Step 5: Run System
 ```bash
-python3 main_continuous_flow.py
+# Recommended: Use Tkinter version
+python3 main_continuous_flow_tkinter.py
+
+# Or use script
+bash run_tkinter.sh
 ```
 
-Press `q` to quit, `r` to reset stats.
+**Controls:** Use buttons on GUI interface
 
 ---
 
