@@ -91,13 +91,33 @@ Tốc độ băng chuyền: 30 cm/s
 
 ### Bước 5: Chạy Hệ Thống
 
+**⚠️ Quan Trọng:** Có 2 phiên bản giao diện!
+
+#### Phiên Bản Tkinter (Khuyến Nghị cho Raspberry Pi)
+```bash
+# Không có lỗi Qt/Wayland, nhẹ hơn, ổn định hơn
+python3 main_continuous_flow_tkinter.py
+
+# Hoặc dùng script
+bash run_tkinter.sh
+```
+
+**Giao diện Tkinter:**
+- ✅ Không lỗi Qt
+- ✅ Nhẹ hơn ~20%
+- ✅ Dễ tùy chỉnh
+- Điều khiển bằng **nút bấm** trên giao diện
+
+#### Phiên Bản OpenCV (Nếu Cần)
 ```bash
 python3 main_continuous_flow.py
 ```
 
-**Phím tắt:**
+**Phím tắt (chỉ OpenCV):**
 - `q` = Thoát
 - `r` = Reset thống kê
+
+→ **Xem chi tiết:** [TKINTER_VERSION.md](TKINTER_VERSION.md)
 
 ---
 

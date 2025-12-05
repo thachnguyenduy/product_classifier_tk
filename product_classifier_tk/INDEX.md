@@ -88,10 +88,20 @@ Welcome! This index helps you quickly find the information you need.
 ## 💻 Code Files
 
 ### Main System (Production)
-**[main_continuous_flow.py](main_continuous_flow.py)** ⭐
-- Main system coordinator
-- All features integrated
-- Run this for production
+
+**[main_continuous_flow_tkinter.py](main_continuous_flow_tkinter.py)** ⭐ **KHUYẾN NGHỊ**
+- Tkinter GUI version
+- **Best for Raspberry Pi** (no Qt issues!)
+- Lighter & more stable
+- Run: `python3 main_continuous_flow_tkinter.py`
+
+**[main_continuous_flow.py](main_continuous_flow.py)** ⚠️
+- OpenCV GUI version
+- May have Qt/Wayland issues on Pi
+- Use if Tkinter not suitable
+- Run: `python3 main_continuous_flow.py`
+
+→ **See comparison:** [TKINTER_VERSION.md](TKINTER_VERSION.md)
 
 **Key Classes:**
 - `Config` - Centralized configuration
@@ -146,9 +156,11 @@ Welcome! This index helps you quickly find the information you need.
 | Calibrate timing | [CALIBRATION_GUIDE.md](CALIBRATION_GUIDE.md) | 2 hours |
 | Compare old vs new | [REFACTORING_COMPARISON.md](REFACTORING_COMPARISON.md) | 15 min |
 | Get project overview | [REFACTOR_SUMMARY.md](REFACTOR_SUMMARY.md) | 10 min |
+| Fix Qt errors / Choose GUI | [TKINTER_VERSION.md](TKINTER_VERSION.md) | 5 min |
 | Test components | Run [test_system_components.py](test_system_components.py) | 5 min |
 | Learn voting | Run [demo_voting_mechanism.py](demo_voting_mechanism.py) | 5 min |
-| Run production | Run [main_continuous_flow.py](main_continuous_flow.py) | - |
+| Run production (Tkinter) ⭐ | Run [main_continuous_flow_tkinter.py](main_continuous_flow_tkinter.py) | - |
+| Run production (OpenCV) | Run [main_continuous_flow.py](main_continuous_flow.py) | - |
 
 ---
 
