@@ -1,16 +1,19 @@
-# Core dependencies
+# Coca-Cola Bottle Defect Detection System - Dependencies
+# Python 3.8+ required
+
+# Computer Vision
 opencv-python>=4.8.0
-pillow>=10.0.0
 numpy>=1.24.0
 
 # AI/ML
-ultralytics>=8.0.0
+ultralytics>=8.0.0  # YOLOv8
 
-# Hardware (optional - only for Raspberry Pi)
+# Serial Communication
 pyserial>=3.5
 
-# Note for Raspberry Pi:
-# - picamera2 is pre-installed on Raspberry Pi OS (Bullseye or later)
-# - If not installed: sudo apt install -y python3-picamera2
-# - On Windows/Mac, the app will run without picamera2
+# Image Processing (optional, for UI)
+Pillow>=10.0.0
+
+# Optional: For better performance on ARM devices
+# opencv-python-headless  # Uncomment if running headless
 

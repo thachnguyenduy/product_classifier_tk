@@ -99,27 +99,27 @@ class HardwareController:
 
     def start_conveyor(self) -> None:
         """Bật băng chuyền (relay ON)."""
-        print("🟢 Starting conveyor...")
+        print(" Starting conveyor...")
         self._send_command("RELAY_ON")
 
     def stop_conveyor(self) -> None:
         """Tắt băng chuyền (relay OFF)."""
-        print("🔴 Stopping conveyor...")
+        print(" Stopping conveyor...")
         self._send_command("RELAY_OFF")
 
     def servo_left(self) -> None:
         """Di chuyển servo sang trái (gạt sản phẩm)."""
-        print("⬅️ Moving servo LEFT...")
+        print(" Moving servo LEFT...")
         self._send_command("SERVO_LEFT")
 
     def servo_center(self) -> None:
         """Trả servo về giữa."""
-        print("⏺️ Moving servo CENTER...")
+        print(" Moving servo CENTER...")
         self._send_command("SERVO_CENTER")
 
     def servo_right(self) -> None:
         """Di chuyển servo sang phải."""
-        print("➡️ Moving servo RIGHT...")
+        print(" Moving servo RIGHT...")
         self._send_command("SERVO_RIGHT")
 
     def eject_bad_product(self) -> None:
@@ -130,7 +130,7 @@ class HardwareController:
         3. Trả servo về giữa
         4. Khởi động băng chuyền
         """
-        print("🚫 Ejecting bad product...")
+        print(" Ejecting bad product...")
         
         if self.serial_conn:
             # Arduino sẽ tự động thực hiện sequence
@@ -152,12 +152,12 @@ class HardwareController:
 
     def get_status(self) -> None:
         """Lấy trạng thái hiện tại từ Arduino."""
-        print("📊 Requesting Arduino status...")
+        print(" Requesting Arduino status...")
         self._send_command("STATUS")
 
     def ping(self) -> bool:
         """Test kết nối với Arduino."""
-        print("🏓 Pinging Arduino...")
+        print(" Pinging Arduino...")
         if self._send_command("PING"):
             return True
         return False
@@ -222,7 +222,7 @@ class HardwareController:
         # Đóng serial connection
         if self.serial_conn:
             self.serial_conn.close()
-            print("✅ Serial connection closed")
+            print(" Serial connection closed")
         
-        print("✅ Hardware cleanup complete")
+        print(" Hardware cleanup complete")
 

@@ -1,93 +1,145 @@
 /*
- * Product Sorter - Arduino Uno Controller
+ * ================================================================================
+ * Coca-Cola Bottle Defect Detection System - Arduino Uno Controller
+ * ================================================================================
  * 
- * Nhận lệnh từ Raspberry Pi qua USB Serial
- * Điều khiển:
- *   - Relay (D7): Bật/tắt băng chuyền (motor DC 12V)
- *   - Servo (D9): Gạt sản phẩm lỗi
+ * Hardware:
+ *   - IR Sensor (D2): Active LOW - Detects bottle presence
+ *   - Relay 5V (D7): LOW Trigger - Controls 12V DC conveyor motor
+ *   - Servo Motor (D9): Ejects defective bottles
  * 
- * Kết nối:
- *   - Relay: VCC→5V, GND→GND, IN→D7
- *   - Servo: Signal→D9, VCC→5V (nguồn tổ ong), GND→GND chung
- *   - USB Serial: Tự động kết nối với Raspberry Pi
+ * Communication:
+ *   - USB Serial @ 115200 baud
+ *   - Sends "DETECTED" when IR sensor detects bottle
+ *   - Receives "START_CONVEYOR", "STOP_CONVEYOR", "REJECT" commands from Pi
+ * 
+ * Pin Connections:
+ *   - IR Sensor: VCC→5V, GND→GND, OUT→D2 (Active LOW)
+ *   - Relay Module: VCC→5V, GND→GND, IN→D7 (LOW=ON, HIGH=OFF)
+ *   - Servo: Signal→D9, VCC→5V (external supply), GND→GND common
+ * 
+ * ================================================================================
  */
 
 #include <Servo.h>
 
-// Pin definitions
-#define RELAY_PIN 7
-#define SERVO_PIN 9
+// ======================== PIN CONFIGURATION ========================
+#define IR_SENSOR_PIN   2    // IR sensor input (Active LOW)
+#define RELAY_PIN       7    // Relay control (LOW trigger)
+#define SERVO_PIN       9    // Servo motor signal
 
-// Servo positions
-#define SERVO_CENTER 90
-#define SERVO_LEFT 0
-#define SERVO_RIGHT 180
+// ======================= SERVO POSITIONS ===========================
+#define SERVO_REST      90   // Rest position (centered)
+#define SERVO_EJECT     0    // Ejection position (push bottle off)
+#define SERVO_RETURN    90   // Return to rest
 
-// Servo object
-Servo sorter;
+// ===================== TIMING PARAMETERS ===========================
+#define DEBOUNCE_TIME   50   // IR sensor debounce (ms)
+#define SERVO_EJECT_TIME 500 // Time to hold eject position (ms)
+#define SERVO_RETURN_TIME 300 // Time to return to rest (ms)
 
-// Command buffer
-String command = "";
+// =========================== GLOBALS ===============================
+Servo ejectorServo;
+String commandBuffer = "";
+
+// IR Sensor state
+int lastIRState = HIGH;          // Previous IR sensor state
+unsigned long lastDebounceTime = 0;
+bool bottleDetected = false;
+
+// Conveyor state
+bool conveyorRunning = false;
+
+// ========================== FUNCTIONS ==============================
 
 void setup() {
-  // Initialize serial communication (115200 baud for faster response)
+  // Initialize serial communication
   Serial.begin(115200);
   
-  // Initialize relay pin
+  // Configure pins
+  pinMode(IR_SENSOR_PIN, INPUT_PULLUP);  // IR sensor with pull-up
   pinMode(RELAY_PIN, OUTPUT);
-  digitalWrite(RELAY_PIN, LOW);  // Băng chuyền dừng ban đầu
+  
+  // Initialize relay (HIGH = OFF for LOW-trigger relay)
+  digitalWrite(RELAY_PIN, HIGH);  // Conveyor OFF initially
   
   // Initialize servo
-  sorter.attach(SERVO_PIN);
-  sorter.write(SERVO_CENTER);  // Vị trí trung tâm
+  ejectorServo.attach(SERVO_PIN);
+  ejectorServo.write(SERVO_REST);
   
   // Startup message
-  Serial.println("Arduino Product Sorter Ready");
-  Serial.println("Commands: RELAY_ON, RELAY_OFF, SERVO_LEFT, SERVO_CENTER, SERVO_RIGHT, EJECT");
+  Serial.println("========================================");
+  Serial.println("Arduino Bottle Defect System Ready");
+  Serial.println("Commands: START_CONVEYOR, STOP_CONVEYOR, REJECT, PING, STATUS");
+  Serial.println("========================================");
 }
 
 void loop() {
-  // Đọc lệnh từ Serial
-  if (Serial.available() > 0) {
+  // Check for bottle detection (IR sensor)
+  checkBottleSensor();
+  
+  // Process incoming serial commands from Raspberry Pi
+  processSerialCommands();
+}
+
+/**
+ * Check IR sensor for bottle detection with debouncing
+ * Sends "DETECTED" signal to Pi when bottle passes sensor
+ */
+void checkBottleSensor() {
+  int currentReading = digitalRead(IR_SENSOR_PIN);
+  
+  // IR sensor is Active LOW: LOW = bottle detected
+  if (currentReading == LOW && lastIRState == HIGH) {
+    // State changed from HIGH to LOW (bottle detected)
+    unsigned long currentTime = millis();
+    
+    if (currentTime - lastDebounceTime > DEBOUNCE_TIME) {
+      // Valid detection (debounced)
+      lastDebounceTime = currentTime;
+      
+      // Send detection signal to Pi
+      Serial.println("DETECTED");
+      
+      bottleDetected = true;
+    }
+  }
+  
+  lastIRState = currentReading;
+}
+
+/**
+ * Process incoming serial commands from Raspberry Pi
+ */
+void processSerialCommands() {
+  while (Serial.available() > 0) {
     char c = Serial.read();
     
     if (c == '\n') {
-      // Kết thúc lệnh, xử lý
-      command.trim();
-      processCommand(command);
-      command = "";  // Reset buffer
+      // Command complete
+      commandBuffer.trim();
+      executeCommand(commandBuffer);
+      commandBuffer = "";
     } else {
-      command += c;
+      commandBuffer += c;
     }
   }
 }
 
-void processCommand(String cmd) {
-  cmd.toUpperCase();  // Chuyển về chữ hoa
+/**
+ * Execute received command
+ */
+void executeCommand(String cmd) {
+  cmd.toUpperCase();
   
-  if (cmd == "RELAY_ON") {
-    digitalWrite(RELAY_PIN, HIGH);
-    Serial.println("OK: Conveyor started");
+  if (cmd == "START_CONVEYOR") {
+    startConveyor();
     
-  } else if (cmd == "RELAY_OFF") {
-    digitalWrite(RELAY_PIN, LOW);
-    Serial.println("OK: Conveyor stopped");
+  } else if (cmd == "STOP_CONVEYOR") {
+    stopConveyor();
     
-  } else if (cmd == "SERVO_LEFT") {
-    sorter.write(SERVO_LEFT);
-    Serial.println("OK: Servo moved to LEFT");
-    
-  } else if (cmd == "SERVO_CENTER") {
-    sorter.write(SERVO_CENTER);
-    Serial.println("OK: Servo moved to CENTER");
-    
-  } else if (cmd == "SERVO_RIGHT") {
-    sorter.write(SERVO_RIGHT);
-    Serial.println("OK: Servo moved to RIGHT");
-    
-  } else if (cmd == "EJECT") {
-    // Sequence tự động: Dừng → Gạt → Trả về → Chạy
-    ejectBadProduct();
+  } else if (cmd == "REJECT") {
+    rejectBottle();
     
   } else if (cmd == "PING") {
     Serial.println("PONG");
@@ -95,43 +147,61 @@ void processCommand(String cmd) {
   } else if (cmd == "STATUS") {
     printStatus();
     
-  } else {
+  } else if (cmd.length() > 0) {
     Serial.print("ERROR: Unknown command: ");
     Serial.println(cmd);
   }
 }
 
-void ejectBadProduct() {
-  Serial.println("Starting eject sequence...");
-  
-  // 1. Dừng băng chuyền
-  digitalWrite(RELAY_PIN, LOW);
-  Serial.println("  Step 1: Conveyor stopped");
-  delay(300);
-  
-  // 2. Gạt sản phẩm
-  sorter.write(SERVO_LEFT);
-  Serial.println("  Step 2: Servo ejecting product");
-  delay(800);  // Đợi servo gạt xong
-  
-  // 3. Trả servo về trung tâm
-  sorter.write(SERVO_CENTER);
-  Serial.println("  Step 3: Servo returned to center");
-  delay(500);
-  
-  // 4. Khởi động lại băng chuyền
-  digitalWrite(RELAY_PIN, HIGH);
-  Serial.println("  Step 4: Conveyor restarted");
-  
-  Serial.println("Eject sequence complete");
+/**
+ * Start conveyor belt (Relay LOW = ON for LOW-trigger relay)
+ */
+void startConveyor() {
+  digitalWrite(RELAY_PIN, LOW);  // LOW triggers relay ON
+  conveyorRunning = true;
+  Serial.println("OK: Conveyor started");
 }
 
+/**
+ * Stop conveyor belt (Relay HIGH = OFF)
+ */
+void stopConveyor() {
+  digitalWrite(RELAY_PIN, HIGH);  // HIGH = relay OFF
+  conveyorRunning = false;
+  Serial.println("OK: Conveyor stopped");
+}
+
+/**
+ * Reject defective bottle using servo
+ * NOTE: Conveyor continues running (continuous flow)
+ */
+void rejectBottle() {
+  Serial.println("REJECT: Ejecting bottle...");
+  
+  // Push servo to eject position
+  ejectorServo.write(SERVO_EJECT);
+  delay(SERVO_EJECT_TIME);
+  
+  // Return servo to rest position
+  ejectorServo.write(SERVO_RETURN);
+  delay(SERVO_RETURN_TIME);
+  
+  Serial.println("OK: Bottle ejected");
+}
+
+/**
+ * Print system status
+ */
 void printStatus() {
-  Serial.println("=== System Status ===");
-  Serial.print("Relay (Conveyor): ");
-  Serial.println(digitalRead(RELAY_PIN) == HIGH ? "ON" : "OFF");
+  Serial.println("====== System Status ======");
+  Serial.print("Conveyor: ");
+  Serial.println(conveyorRunning ? "RUNNING" : "STOPPED");
+  Serial.print("Relay State: ");
+  Serial.println(digitalRead(RELAY_PIN) == LOW ? "ON (LOW)" : "OFF (HIGH)");
+  Serial.print("IR Sensor: ");
+  Serial.println(digitalRead(IR_SENSOR_PIN) == LOW ? "BLOCKED" : "CLEAR");
   Serial.print("Servo Position: ");
-  Serial.println(sorter.read());
-  Serial.println("====================");
+  Serial.println(ejectorServo.read());
+  Serial.println("===========================");
 }
 

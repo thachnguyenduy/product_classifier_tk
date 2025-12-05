@@ -25,22 +25,24 @@ class AIModel:
         
         if not results:
             print("No results from YOLO model")
-            return {"result": "GOOD", "confidence": 1.0, "detections": []}
+            return None
 
         result = results[0]
         detections = []
         
-        # Defect classes that indicate BAD product
-        defect_classes = {
-            "cap-defect", "filling-defect", "label-defect", "wrong-product"
-        }
+        # Required parts for GOOD product
+        required_parts = {"cap", "filled", "label"}
+        
+        # Defect classes
+        defect_classes = {"cap-defect", "filling-defect", "label-defect", "wrong-product"}
 
         if result.boxes is not None and len(result.boxes) > 0:
             boxes = result.boxes
             print(f"Found {len(boxes)} boxes")
             
+            detected_parts = set()
             has_defect = False
-            defect_detections = []
+            best_confidence = 0
             
             for idx in range(len(boxes)):
                 bbox = boxes.xyxy[idx].cpu().numpy().astype(int).tolist()
@@ -55,27 +57,34 @@ class AIModel:
                     "label": label,
                 }
                 detections.append(detection)
+                best_confidence = max(best_confidence, conf)
                 
-                # Check if this is a defect
                 label_lower = label.lower()
+                
+                # Check for defects
                 if any(defect in label_lower for defect in defect_classes):
                     has_defect = True
-                    defect_detections.append(detection)
-                    print(f"  ❌ DEFECT: {label} ({conf:.2f}) at {bbox}")
+                    print(f"  ❌ DEFECT: {label} ({conf:.2f})")
                 else:
-                    print(f"  ✅ OK: {label} ({conf:.2f}) at {bbox}")
+                    # Track normal parts
+                    if label_lower in required_parts:
+                        detected_parts.add(label_lower)
+                    print(f"  ✅ OK: {label} ({conf:.2f})")
             
-            # If any defect is found, product is BAD
+            # Determine result
             if has_defect:
-                best_conf = max(det["confidence"] for det in defect_detections)
-                print(f"→ Returning BAD (found {len(defect_detections)} defect(s), best conf: {best_conf:.2f})")
-                return {"result": "BAD", "confidence": best_conf, "detections": detections}
-            else:
-                # All detections are normal parts (cap, coca, filled, label)
-                best_conf = max(det["confidence"] for det in detections)
-                print(f"→ Returning GOOD (all {len(detections)} parts are OK, best conf: {best_conf:.2f})")
-                return {"result": "GOOD", "confidence": best_conf, "detections": detections}
+                print(f"→ BAD: Found defect(s)")
+                return {"result": "BAD", "confidence": best_confidence, "detections": detections, "reason": "Phát hiện lỗi"}
+            
+            # Check if all required parts are present
+            missing_parts = required_parts - detected_parts
+            if missing_parts:
+                print(f"→ BAD: Missing {missing_parts}")
+                return {"result": "BAD", "confidence": best_confidence, "detections": detections, "reason": f"Thiếu: {', '.join(missing_parts)}"}
+            
+            print(f"→ GOOD: All parts OK")
+            return {"result": "GOOD", "confidence": best_confidence, "detections": detections, "reason": "Đầy đủ"}
 
-        print("→ No detections found, returning GOOD (no product)")
-        return {"result": "GOOD", "confidence": 1.0, "detections": []}
+        print("→ No detections")
+        return None
 

@@ -1,230 +1,282 @@
-"""Tkinter UI for the Raspberry Pi product classifier."""
-from __future__ import annotations
-
+"""Main Window - Giao diện phân loại sản phẩm."""
 import threading
+import time
 import tkinter as tk
+from tkinter import messagebox
 from datetime import datetime
 from pathlib import Path
-from tkinter import messagebox, ttk
-from typing import Optional
-
-import cv2
 from PIL import Image, ImageTk
+import cv2
 
 from core.ai import AIModel
 from core.camera import CameraStreamer
 from core.database import ProductDatabase
 from core.hardware import HardwareController
-from ui.history_window import HistoryWindow
 
 
-class ProductClassifierApp(tk.Tk):
-    """Main Tkinter application."""
+class MainWindow(tk.Tk):
+    """Giao diện chính - Phân loại sản phẩm Coca-Cola."""
 
-    def __init__(self, model_path: Path, database_path: Path) -> None:
+    def __init__(self, model_path: Path, database_path: Path):
         super().__init__()
-        self.title("Phân loại sản phẩm - Raspberry Pi 5")
-        self.geometry("1100x650")
-        self.configure(bg="#1e1e1e")
 
-        self.model_path = model_path
-        self.database_path = database_path
+        self.title("MainWindow")
+        self.geometry("1400x800")
+        self.configure(bg="#f0f0f0")
 
-        self.camera = CameraStreamer()
+        # Initialize components
+        self.camera = CameraStreamer(camera_index=0, width=640, height=480)
         self.ai_model = AIModel(model_path)
         self.database = ProductDatabase(database_path)
         self.hardware = HardwareController()
 
-        self.video_label = ttk.Label(self, text="Camera feed", anchor=tk.CENTER)
+        # State variables
+        self.detection_running = False
+        self.conveyor_running = False
+        self.last_result = None
+        self.processing_time_ms = 0
+        
+        # Image references (prevent garbage collection)
+        self.raw_photo = None
+        self.result_photo = None
 
-        self.detection_enabled = False
-        self._detection_in_progress = False
-        self._last_result: Optional[dict] = None
+        # Build UI
+        self._build_ui()
 
-        self.fps_var = tk.StringVar(value="FPS: --")
-        self.result_var = tk.StringVar(value="Result: --")
-        self.confidence_var = tk.StringVar(value="Confidence: --")
+        # Start update loop
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self.after(100, self._update_loop)
 
-        self._build_menu()
-        self._build_layout()
+    def _build_ui(self):
+        """Xây dựng giao diện."""
+        # === LEFT PANEL: Raw Camera ===
+        self.frame_left = tk.Frame(self, bg="#d0d0d0", width=540, height=720)
+        self.frame_left.place(x=10, y=40)
+        self.frame_left.pack_propagate(False)
+        
+        self.lbl_raw = tk.Label(self.frame_left, bg="#d0d0d0", text="Camera gốc")
+        self.lbl_raw.pack(fill=tk.BOTH, expand=True)
 
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.after(50, self._update_loop)
+        # === MIDDLE PANEL: Detection Result ===
+        self.frame_middle = tk.Frame(self, bg="#d0d0d0", width=540, height=720)
+        self.frame_middle.place(x=560, y=40)
+        self.frame_middle.pack_propagate(False)
+        
+        self.lbl_result_img = tk.Label(self.frame_middle, bg="#d0d0d0", text="Kết quả detection")
+        self.lbl_result_img.pack(fill=tk.BOTH, expand=True)
 
-    def _build_menu(self) -> None:
-        menubar = tk.Menu(self)
+        # === RIGHT PANEL: Controls ===
+        self.frame_right = tk.Frame(self, bg="#e8f4f8", width=220, height=720)
+        self.frame_right.place(x=1110, y=40)
 
-        file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Exit", command=self.on_close)
-        menubar.add_cascade(label="File", menu=file_menu)
+        # MỞ CAMERA button
+        self.btn_camera = tk.Button(
+            self.frame_right,
+            text="MỞ CAMERA",
+            font=("Arial", 11),
+            width=16,
+            height=2,
+            bg="white",
+            relief="solid",
+            command=self._toggle_camera
+        )
+        self.btn_camera.place(x=20, y=20)
 
-        tools_menu = tk.Menu(menubar, tearoff=0)
-        tools_menu.add_command(label="Hardware test", command=self._hardware_test)
-        menubar.add_cascade(label="Tools", menu=tools_menu)
+        # CHẠY BĂNG TẢI button  
+        self.btn_conveyor = tk.Button(
+            self.frame_right,
+            text="CHẠY BĂNG TẢI",
+            font=("Arial", 11),
+            width=16,
+            height=2,
+            bg="white",
+            relief="solid",
+            command=self._toggle_conveyor
+        )
+        self.btn_conveyor.place(x=20, y=90)
 
-        view_menu = tk.Menu(menubar, tearoff=0)
-        view_menu.add_command(label="History", command=self._open_history)
-        menubar.add_cascade(label="View", menu=view_menu)
+        # KẾT QUẢ label
+        tk.Label(
+            self.frame_right,
+            text="KẾT QUẢ",
+            font=("Arial", 11, "bold"),
+            width=16,
+            height=2,
+            bg="white",
+            relief="solid"
+        ).place(x=20, y=200)
 
-        self.config(menu=menubar)
+        # Result value
+        self.lbl_result = tk.Label(
+            self.frame_right,
+            text="---",
+            font=("Arial", 11, "bold"),
+            width=16,
+            height=2,
+            bg="white",
+            relief="solid"
+        )
+        self.lbl_result.place(x=20, y=270)
 
-    def _build_layout(self) -> None:
-        main_frame = ttk.Frame(self)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # THỜI GIAN XỬ LÝ label
+        tk.Label(
+            self.frame_right,
+            text="THỜI GIAN XỬ LÝ",
+            font=("Arial", 11, "bold"),
+            width=16,
+            height=2,
+            bg="white",
+            relief="solid"
+        ).place(x=20, y=380)
 
-        camera_frame = ttk.Frame(main_frame)
-        camera_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.video_label = tk.Label(camera_frame, text="Camera feed", bg="#000000", fg="#ffffff")
-        self.video_label.pack(fill=tk.BOTH, expand=True)
+        # Processing time value
+        self.lbl_time = tk.Label(
+            self.frame_right,
+            text="0.00",
+            font=("Arial", 11, "bold"),
+            width=16,
+            height=2,
+            bg="white",
+            relief="solid"
+        )
+        self.lbl_time.place(x=20, y=450)
 
-        control_frame = ttk.Frame(main_frame, width=250)
-        control_frame.pack(side=tk.RIGHT, fill=tk.Y)
-
-        button_specs = [
-            ("Start Camera", self.start_camera),
-            ("Stop Camera", self.stop_camera),
-            ("Start Detection", self.start_detection),
-            ("Stop Detection", self.stop_detection),
-            ("Start Conveyor", self.hardware.start_conveyor),
-            ("Stop Conveyor", self.hardware.stop_conveyor),
-        ]
-
-        for text, command in button_specs:
-            btn = ttk.Button(control_frame, text=text, command=command)
-            btn.pack(fill=tk.X, pady=5)
-
-        ttk.Separator(control_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
-
-        ttk.Button(control_frame, text="History", command=self._open_history).pack(fill=tk.X, pady=5)
-        ttk.Button(control_frame, text="Hardware test", command=self._hardware_test).pack(fill=tk.X, pady=5)
-
-        status_frame = ttk.Frame(self)
-        status_frame.pack(fill=tk.X, side=tk.BOTTOM, padx=10, pady=5)
-
-        ttk.Label(status_frame, textvariable=self.fps_var).pack(side=tk.LEFT, padx=5)
-        ttk.Label(status_frame, textvariable=self.result_var).pack(side=tk.LEFT, padx=5)
-        ttk.Label(status_frame, textvariable=self.confidence_var).pack(side=tk.LEFT, padx=5)
-
-    def start_camera(self) -> None:
-        if self.camera.start():
-            self.result_var.set("Result: --")
-        else:
-            messagebox.showerror("Camera", "Unable to access camera.")
-
-    def stop_camera(self) -> None:
-        self.camera.stop()
-        self.stop_detection()
-        self.video_label.config(text="Camera stopped", image="")
-
-    def start_detection(self) -> None:
+    def _toggle_camera(self):
+        """Bật/tắt camera."""
         if not self.camera.running:
-            messagebox.showwarning("Detection", "Start the camera first.")
-            return
-        self.detection_enabled = True
-        print("Detection enabled")  # Debug log
-
-    def stop_detection(self) -> None:
-        self.detection_enabled = False
-        self._detection_in_progress = False
-        self._last_result = None
-        self.result_var.set("Result: --")
-        self.confidence_var.set("Confidence: --")
-        print("Detection stopped")  # Debug log
-
-    def _open_history(self) -> None:
-        HistoryWindow(self, self.database)
-
-    def _hardware_test(self) -> None:
-        threading.Thread(target=self.hardware.hardware_test, daemon=True).start()
-
-    def _update_loop(self) -> None:
-        frame, fps = self.camera.get_frame()
-        if frame is not None:
-            display_frame = frame.copy()
-            
-            # Draw bounding boxes if we have detection results
-            if self._last_result and self._last_result.get("detections"):
-                defect_keywords = ["defect", "wrong"]
-                
-                for det in self._last_result["detections"]:
-                    x1, y1, x2, y2 = det["bbox"]
-                    label_lower = det["label"].lower()
-                    
-                    # Red for defects, green for normal parts
-                    is_defect = any(kw in label_lower for kw in defect_keywords)
-                    color = (0, 0, 255) if is_defect else (0, 255, 0)  # BGR: Red or Green
-                    thickness = 3 if is_defect else 2
-                    
-                    cv2.rectangle(display_frame, (x1, y1), (x2, y2), color, thickness)
-                    label_text = f"{det['label']} {det['confidence']:.2f}"
-                    
-                    # Background for text
-                    (text_w, text_h), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
-                    cv2.rectangle(display_frame, (x1, y1 - text_h - 10), (x1 + text_w, y1), color, -1)
-                    cv2.putText(display_frame, label_text, (x1, y1 - 5), 
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
-            
-            rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
-            image = Image.fromarray(rgb)
-            imgtk = ImageTk.PhotoImage(image=image.resize((640, 480)))
-            self.video_label.configure(image=imgtk, text="")
-            self.video_label.image = imgtk
-            self.fps_var.set(f"FPS: {fps:.1f}")
-
-            if self.detection_enabled and not self._detection_in_progress:
-                self._detection_in_progress = True
-                frame_copy = frame.copy()
-                threading.Thread(target=self._run_detection, args=(frame_copy,), daemon=True).start()
-
+            if self.camera.start():
+                self.btn_camera.config(text="TẮT CAMERA", bg="#ffcccc")
+                self.detection_running = True
+                print("[UI] Camera ON")
+            else:
+                messagebox.showerror("Lỗi", "Không thể mở camera!")
         else:
-            self.video_label.configure(text="No frame", image="")
+            self.detection_running = False
+            self.camera.stop()
+            self.btn_camera.config(text="MỞ CAMERA", bg="white")
+            self.lbl_raw.config(image="", text="Camera gốc")
+            self.lbl_result_img.config(image="", text="Kết quả detection")
+            print("[UI] Camera OFF")
 
-        self.after(50, self._update_loop)
+    def _toggle_conveyor(self):
+        """Bật/tắt băng tải."""
+        if not self.conveyor_running:
+            self.hardware.start_conveyor()
+            self.conveyor_running = True
+            self.btn_conveyor.config(text="DỪNG BĂNG TẢI", bg="#90EE90")
+        else:
+            self.hardware.stop_conveyor()
+            self.conveyor_running = False
+            self.btn_conveyor.config(text="CHẠY BĂNG TẢI", bg="white")
 
-    def _run_detection(self, frame) -> None:
+    def _update_loop(self):
+        """Vòng lặp cập nhật."""
+        if self.camera.running:
+            frame, fps = self.camera.get_frame()
+
+            if frame is not None:
+                # Display raw frame (video realtime)
+                self._show_image(frame, self.lbl_raw, "raw")
+
+                # Run detection khi enabled
+                if self.detection_running and not hasattr(self, '_detecting'):
+                    self._detecting = True
+                    threading.Thread(
+                        target=self._run_detection, 
+                        args=(frame.copy(),), 
+                        daemon=True
+                    ).start()
+
+        self.after(30, self._update_loop)
+
+    def _run_detection(self, frame):
+        """Chạy detection và hiển thị kết quả."""
         try:
-            print("Running detection...")  # Debug log
+            start = time.time()
             result = self.ai_model.predict(frame)
-            print(f"Detection result: {result}")  # Debug log
-            timestamp = datetime.now().isoformat(timespec="seconds")
-            self.after(0, lambda: self._handle_detection_result(result, timestamp, None))
-        except Exception as exc:
-            print(f"Detection error: {exc}")  # Debug log
-            import traceback
-            traceback.print_exc()
-            self.after(0, lambda: self._handle_detection_result(None, None, exc))
+            self.processing_time_ms = (time.time() - start) * 1000
+
+            if result and result.get("detections"):
+                # Có detection → vẽ bounding boxes
+                result_frame = frame.copy()
+                
+                for det in result["detections"]:
+                    x1, y1, x2, y2 = det["bbox"]
+                    label = det["label"]
+                    conf = det["confidence"]
+                    
+                    # Màu cam cho tất cả boxes
+                    color = (0, 165, 255)  # BGR: Orange
+                    cv2.rectangle(result_frame, (x1, y1), (x2, y2), color, 2)
+                    
+                    # Vẽ label
+                    text = f"{label} {conf:.2f}"
+                    cv2.putText(result_frame, text, (x1, y1-5), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+                # Hiển thị ảnh kết quả (ảnh tĩnh, không update liên tục)
+                self.after(0, lambda: self._show_image(result_frame, self.lbl_result_img, "result"))
+
+                # Update labels
+                res = result.get("result", "---")
+                reason = result.get("reason", "")
+                
+                if res == "BAD":
+                    self.after(0, lambda: self.lbl_result.config(text="HÀNG BỊ LỖI", bg="#ffcccc"))
+                    # Trigger hardware
+                    if self.conveyor_running:
+                        threading.Thread(target=self.hardware.eject_bad_product, daemon=True).start()
+                else:
+                    self.after(0, lambda: self.lbl_result.config(text="HÀNG TỐT", bg="#90EE90"))
+
+                # Save to DB
+                self.database.insert_result(
+                    datetime.now().isoformat(timespec="seconds"),
+                    res,
+                    result.get("confidence", 0)
+                )
+                
+                # Update time
+                self.after(0, lambda: self.lbl_time.config(text=f"{self.processing_time_ms:.2f}"))
+                
+                print(f"[Result] {res} - {reason}")
+
+        except Exception as e:
+            print(f"[Detection] Error: {e}")
         finally:
-            self.after(0, lambda: setattr(self, "_detection_in_progress", False))
+            self._detecting = False
 
-    def _handle_detection_result(self, result: Optional[dict], timestamp: Optional[str], error: Optional[Exception]) -> None:
-        if error:
-            messagebox.showerror("Detection error", str(error))
-            return
-        if not result or not timestamp:
-            return
+    def _show_image(self, frame, label, img_type):
+        """Hiển thị ảnh."""
+        try:
+            # Resize
+            h, w = frame.shape[:2]
+            scale = min(530 / w, 710 / h)
+            new_size = (int(w * scale), int(h * scale))
+            resized = cv2.resize(frame, new_size)
 
-        # Store result for drawing bounding boxes
-        self._last_result = result
-        
-        # Save to database
-        self.database.insert_result(timestamp, result["result"], float(result["confidence"]))
-        
-        # Trigger hardware action for bad products
-        if result["result"] == "BAD":
-            threading.Thread(target=self.hardware.push_bad_product, daemon=True).start()
+            # BGR to RGB
+            rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+            img = Image.fromarray(rgb)
+            photo = ImageTk.PhotoImage(img)
 
-        # Update status bar
-        self.result_var.set(f"Result: {result['result']}")
-        self.confidence_var.set(f"Confidence: {result['confidence']:.2f}")
-        
-        # Show detection info
-        if result.get("detections"):
-            det_count = len(result["detections"])
-            print(f"Found {det_count} detection(s)")  # Debug log
+            # Update
+            label.config(image=photo, text="")
+            
+            # Keep reference
+            if img_type == "raw":
+                self.raw_photo = photo
+            else:
+                self.result_photo = photo
 
-    def on_close(self) -> None:
-        self.detection_enabled = False
+        except Exception as e:
+            print(f"[Display] Error: {e}")
+
+    def _on_close(self):
+        """Đóng ứng dụng."""
+        self.detection_running = False
+        if self.conveyor_running:
+            self.hardware.stop_conveyor()
         self.camera.stop()
         self.hardware.cleanup()
         self.destroy()
-

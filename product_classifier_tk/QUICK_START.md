@@ -1,80 +1,102 @@
-# Quick Start Guide
+# ⚡ Quick Start Guide
 
-## 🚀 Chạy nhanh
+## 🚀 5 Minutes Setup
 
+### Step 1: Upload Arduino Firmware
+```bash
+# Mở Arduino IDE
+# File → Open → arduino/product_sorter.ino
+# Upload to Arduino Uno
+```
+
+### Step 2: Install Python Dependencies
 ```bash
 cd product_classifier_tk
-python main.py
+pip3 install -r requirements.txt
 ```
 
-## 📋 Các bước sử dụng
-
-1. **Start Camera** → Bật camera
-2. **Start Detection** → Bật AI nhận diện
-3. Đưa chai vào trước camera
-4. Xem kết quả:
-   - 🟢 **GOOD** = Sản phẩm OK
-   - 🔴 **BAD** = Có lỗi
-5. **History** → Xem lịch sử
-
-## 🎯 Kết quả phân loại
-
-### ✅ GOOD (Sản phẩm tốt)
-- Chỉ detect: `cap`, `coca`, `filled`, `label`
-- Không có defect nào
-- Box màu xanh
-
-### ❌ BAD (Sản phẩm lỗi)
-- Detect bất kỳ: `Cap-Defect`, `Filling-Defect`, `Label-Defect`, `Wrong-Product`
-- Box màu đỏ dày
-- Servo sẽ đẩy chai ra
-
-## 🔧 Test nhanh
-
+### Step 3: Test Components (Optional but Recommended)
 ```bash
-# Test camera + model
-python test_camera_model.py
+python3 test_system_components.py
 ```
 
-## 📊 Xem log
-
-Mở console/terminal khi chạy app để thấy:
-```
-Running detection...
-Found 3 boxes
-  ✅ OK: cap (0.92)
-  ✅ OK: coca (0.88)
-  ❌ DEFECT: Filling-Defect (0.85)
-→ Returning BAD
+### Step 4: Configure System
+Edit `main_continuous_flow.py`, tìm class `Config`:
+```python
+SERIAL_PORT = "/dev/ttyACM0"  # Adjust if needed
+CAMERA_INDEX = 0              # Adjust if needed
+PHYSICAL_DELAY = 2.0          # MUST CALIBRATE!
 ```
 
-## ⚙️ Cài đặt
-
+### Step 5: Run System
 ```bash
-pip install -r requirements.txt
+python3 main_continuous_flow.py
 ```
 
-## 📖 Đọc thêm
+Press `q` to quit, `r` to reset stats.
 
-- `README.md` - Hướng dẫn đầy đủ
-- `CLASSIFICATION_LOGIC.md` - Chi tiết logic phân loại
-- `requirements.txt` - Dependencies
+---
 
-## 🆘 Lỗi thường gặp
+## ⚙️ Calibration PHYSICAL_DELAY
 
-### Camera không mở được
-```bash
-python test_camera_model.py  # Test camera
+**IMPORTANT:** Must calibrate before production use!
+
+1. Measure distance: Camera → Ejector (cm)
+2. Measure conveyor speed (cm/s)
+3. Calculate: `PHYSICAL_DELAY = distance / speed`
+4. Test and fine-tune (±0.1s increments)
+
+Example:
+- Distance: 60 cm
+- Speed: 30 cm/s
+- → `PHYSICAL_DELAY = 2.0` seconds
+
+---
+
+## 🔧 Hardware Connections
+
+### Arduino Pins:
+- **D2**: IR Sensor (Active LOW)
+- **D7**: Relay (LOW Trigger) → 12V Conveyor
+- **D9**: Servo Motor
+
+### Power:
+- Arduino: USB from Pi
+- Servo: External 5V supply (1A+)
+- Conveyor: 12V supply
+
+---
+
+## 📊 Expected Dashboard
+
+```
+┌─────────────────────────────────┐
+│ Live Feed  │  Latest Defect     │
+│ (Camera)   │  (Annotated)       │
+├─────────────────────────────────┤
+│ Total: 125  Good: 118  Bad: 7   │
+│ no_cap: 2  low_level: 3  ...    │
+└─────────────────────────────────┘
 ```
 
-### Model không detect
-- Kiểm tra ánh sáng
-- Kiểm tra khoảng cách camera
-- Xem console log
+---
 
-### PyTorch lỗi (Windows)
-```bash
-pip uninstall torch torchvision
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-```
+## ❓ Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Camera not found | `ls /dev/video*`, edit `CAMERA_INDEX` |
+| Arduino not connected | `ls /dev/ttyACM*`, check USB cable |
+| Model not found | Place `my_model.pt` in `model/` folder |
+| Wrong eject timing | Calibrate `PHYSICAL_DELAY` |
+
+---
+
+## 📚 Full Documentation
+
+See `CONTINUOUS_FLOW_README.md` for detailed information.
+
+---
+
+**Ready to inspect bottles! 🍾**
 
