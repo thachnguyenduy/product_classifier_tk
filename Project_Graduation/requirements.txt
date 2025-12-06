@@ -1,0 +1,23 @@
+# Coca-Cola Sorting System - Python Dependencies
+
+# Computer Vision
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# Serial Communication
+pyserial>=3.5
+
+# NCNN (Optional - for AI inference)
+# Note: ncnn-python may need to be installed separately or built from source
+# Uncomment below if ncnn-python is available via pip in your environment
+# ncnn>=1.0.0
+
+# Database
+# sqlite3 is included in Python standard library
+
+# GUI
+# tkinter is included in Python standard library
+
+# Additional utilities
+numpy>=1.24.0
+
