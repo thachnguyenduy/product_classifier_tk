@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 import time
 import os
+import ncnn
 
 # Kiểm tra NCNN
 try:
@@ -122,39 +123,52 @@ def parse_yolo_output(output, img_w, img_h):
         # Convert NCNN Mat to numpy
         out_np = np.array(output)
         
-        # YOLO output shape: (1, num_detections, 85)
-        # 85 = 4 (bbox) + 1 (objectness) + 80 (classes, but we only use 8)
+        # Debug: In shape để biết format
+        print(f"[DEBUG] Output shape: {out_np.shape}")
         
+        # YOLOv8 NCNN output thường có shape: (1, 84, 8400) hoặc (84, 8400)
+        # 84 = 4 (bbox) + 80 (classes, nhưng ta chỉ dùng 8)
+        # 8400 = số anchor boxes
+        
+        # Remove batch dimension nếu có
         if len(out_np.shape) == 3:
-            out_np = out_np[0]  # Remove batch dimension
+            out_np = out_np[0]
+        
+        # Nếu shape là (num_classes+4, num_boxes), transpose về (num_boxes, num_classes+4)
+        if out_np.shape[0] < out_np.shape[1]:
+            out_np = out_np.T
+        
+        print(f"[DEBUG] After transpose: {out_np.shape}")
+        print(f"[DEBUG] Sample detection: {out_np[0][:12]}")  # In 12 giá trị đầu
         
         # Scale factors
         scale_x = img_w / INPUT_SIZE
         scale_y = img_h / INPUT_SIZE
         
         # Parse each detection
-        for detection in out_np:
-            if len(detection) < 5 + len(CLASS_NAMES):
+        num_detections = min(out_np.shape[0], 8400)  # Limit số detections
+        
+        for i in range(num_detections):
+            detection = out_np[i]
+            
+            # YOLOv8 format: [x_center, y_center, width, height, class1_score, class2_score, ...]
+            # Không có objectness score riêng
+            
+            if len(detection) < 4 + len(CLASS_NAMES):
                 continue
             
-            # Extract box coordinates (center format)
+            # Extract box coordinates (center format, normalized 0-1)
             x_center = detection[0] * scale_x
             y_center = detection[1] * scale_y
             width = detection[2] * scale_x
             height = detection[3] * scale_y
             
-            # Objectness score
-            objectness = detection[4]
-            
-            # Class scores (only first 8 for our model)
-            class_scores = detection[5:5 + len(CLASS_NAMES)]
+            # Class scores (chỉ lấy 8 classes đầu)
+            class_scores = detection[4:4 + len(CLASS_NAMES)]
             
             # Get best class
             class_id = np.argmax(class_scores)
-            class_confidence = class_scores[class_id]
-            
-            # Overall confidence
-            confidence = objectness * class_confidence
+            confidence = class_scores[class_id]
             
             # Filter by threshold
             if confidence > CONFIDENCE_THRESHOLD:
@@ -164,15 +178,29 @@ def parse_yolo_output(output, img_w, img_h):
                 x2 = int(x_center + width / 2)
                 y2 = int(y_center + height / 2)
                 
-                detections.append({
-                    'class_id': int(class_id),
-                    'class_name': CLASS_NAMES[class_id],
-                    'confidence': float(confidence),
-                    'bbox': [x1, y1, x2, y2]
-                })
+                # Clamp to image boundaries
+                x1 = max(0, min(x1, img_w))
+                y1 = max(0, min(y1, img_h))
+                x2 = max(0, min(x2, img_w))
+                y2 = max(0, min(y2, img_h))
+                
+                # Chỉ thêm nếu box hợp lệ
+                if x2 > x1 and y2 > y1:
+                    detections.append({
+                        'class_id': int(class_id),
+                        'class_name': CLASS_NAMES[class_id],
+                        'confidence': float(confidence),
+                        'bbox': [x1, y1, x2, y2]
+                    })
+                    
+                    # Debug: In detection đầu tiên
+                    if len(detections) == 1:
+                        print(f"[DEBUG] First detection: {CLASS_NAMES[class_id]} at ({x1},{y1})-({x2},{y2}), conf={confidence:.2f}")
     
     except Exception as e:
         print(f"⚠ Parse error: {e}")
+        import traceback
+        traceback.print_exc()
     
     return detections
 
