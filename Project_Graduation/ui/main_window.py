@@ -106,6 +106,11 @@ class MainWindow:
         right_frame = ttk.Frame(main_frame)
         right_frame.grid(row=1, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
         right_frame.columnconfigure(0, weight=1)
+        right_frame.rowconfigure(0, weight=0)  # Snapshot
+        right_frame.rowconfigure(1, weight=0)  # Result
+        right_frame.rowconfigure(2, weight=0)  # Details
+        right_frame.rowconfigure(3, weight=0)  # Stats
+        right_frame.rowconfigure(4, weight=1)  # Control (fill remaining space)
         
         # Snapshot display
         snapshot_frame = ttk.LabelFrame(right_frame, text="Last Inspection", padding="10")
@@ -143,26 +148,26 @@ class MainWindow:
                                      font=("Arial", 10), justify=tk.LEFT)
         self.stats_label.grid(row=0, column=0, sticky=(tk.W, tk.E))
         
-        # Control buttons
+        # Control buttons - FIX: Always visible
         control_frame = ttk.LabelFrame(right_frame, text="System Control", padding="10")
-        control_frame.grid(row=4, column=0, sticky=(tk.W, tk.E))
+        control_frame.grid(row=4, column=0, sticky=(tk.W, tk.E, tk.N))  # Changed to tk.N instead of tk.S
         control_frame.columnconfigure(0, weight=1)
         control_frame.columnconfigure(1, weight=1)
         
         self.start_button = ttk.Button(control_frame, text="▶ START SYSTEM", 
-                                       command=self.start_system, style="Accent.TButton")
+                                       command=self.start_system)
         self.start_button.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=(0, 5), pady=5)
         
         self.stop_button = ttk.Button(control_frame, text="⏹ STOP SYSTEM", 
                                      command=self.stop_system, state=tk.DISABLED)
         self.stop_button.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(5, 0), pady=5)
         
-        history_button = ttk.Button(control_frame, text="📊 View History", 
+        self.history_button = ttk.Button(control_frame, text="📊 View History", 
                                    command=self.open_history)
-        history_button.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
+        self.history_button.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=(0, 5))
         
-        exit_button = ttk.Button(control_frame, text="🚪 Exit", command=self.on_closing)
-        exit_button.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E))
+        self.exit_button = ttk.Button(control_frame, text="🚪 Exit", command=self.on_closing)
+        self.exit_button.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E))
     
     def _format_stats(self):
         """Format statistics string"""
@@ -215,6 +220,9 @@ class MainWindow:
         self.status_label.config(text="● RUNNING", foreground="green")
         self.start_button.config(state=tk.DISABLED)
         self.stop_button.config(state=tk.NORMAL)
+        # FIX: Keep other buttons enabled
+        self.history_button.config(state=tk.NORMAL)
+        self.exit_button.config(state=tk.NORMAL)
         
         print("[UI] System started")
     
@@ -230,30 +238,48 @@ class MainWindow:
         print("[UI] System stopped")
     
     def on_bottle_detected(self):
-        """Handle bottle detection from Arduino"""
+        """Handle bottle detection from Arduino - CHỤP NHIỀU ẢNH"""
         if not self.system_running or self.processing:
             return
         
-        print("[UI] Bottle detected! Starting inspection...")
+        print("[UI] Bottle detected! Starting multi-frame inspection...")
         self.processing = True
         
         try:
-            # Capture snapshot
             start_time = time.time()
-            snapshot = self.camera.capture_snapshot()
             
-            if snapshot is None:
-                print("[ERROR] Failed to capture snapshot")
+            # CHỤP NHIỀU ẢNH (3-5 ảnh)
+            num_frames = 5
+            frames = []
+            
+            print(f"[UI] Capturing {num_frames} frames...")
+            for i in range(num_frames):
+                snapshot = self.camera.capture_snapshot()
+                if snapshot is not None:
+                    frames.append(snapshot)
+                    print(f"[UI] Frame {i+1}/{num_frames} captured")
+                time.sleep(0.1)  # 100ms giữa mỗi ảnh
+            
+            if not frames:
+                print("[ERROR] Failed to capture any frames")
                 self.processing = False
                 return
             
-            # Run AI prediction
-            result = self.ai.predict(snapshot)
+            print(f"[UI] Running AI on {len(frames)} frames...")
+            
+            # Run AI prediction trên nhiều ảnh
+            result = self.ai.predict_multiple(frames)
             processing_time = time.time() - start_time
             
-            # Save image
+            # Lấy ảnh có bounding boxes
+            if 'annotated_image' in result:
+                annotated_image = result['annotated_image']
+            else:
+                annotated_image = frames[0]  # Fallback
+            
+            # Save annotated image
             save_dir = "captures/ok" if result['result'] == 'OK' else "captures/ng"
-            image_path = self.camera.save_image(snapshot, save_dir, result['result'])
+            image_path = self.camera.save_image(annotated_image, save_dir, result['result'])
             
             # Add to database
             result['image_path'] = image_path
@@ -267,8 +293,8 @@ class MainWindow:
             else:
                 self.session_ng += 1
             
-            # Update UI
-            self._display_result(snapshot, result)
+            # Update UI - HIỂN THỊ ẢNH CÓ BOUNDING BOXES
+            self._display_result(annotated_image, result)
             
             # Send result to Arduino
             if result['result'] == 'OK':
@@ -276,17 +302,19 @@ class MainWindow:
             else:
                 self.hardware.send_ng()
             
-            print(f"[UI] Inspection complete: {result['result']} ({processing_time:.2f}s)")
+            print(f"[UI] Inspection complete: {result['result']} ({processing_time:.2f}s, {len(frames)} frames)")
             
         except Exception as e:
             print(f"[ERROR] Inspection error: {e}")
+            import traceback
+            traceback.print_exc()
         
         finally:
             self.processing = False
     
     def _display_result(self, snapshot, result):
-        """Display inspection result on UI"""
-        # Display snapshot
+        """Display inspection result on UI - with bounding boxes"""
+        # Display snapshot WITH BOUNDING BOXES
         display_snapshot = cv2.cvtColor(snapshot, cv2.COLOR_BGR2RGB)
         display_snapshot = cv2.resize(display_snapshot, (350, 260))
         
@@ -352,4 +380,3 @@ class MainWindow:
         
         self.root.quit()
         self.root.destroy()
-

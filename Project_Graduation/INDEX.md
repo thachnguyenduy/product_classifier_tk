@@ -31,6 +31,7 @@ Complete guide to all files and documentation in this project.
 | **ARCHITECTURE.md** | System architecture & design | Developers, reviewers |
 | **PROJECT_SUMMARY.md** | Complete project overview | Managers, evaluators |
 | **README.md** | Main documentation | Everyone |
+| **TEST_MODEL_GUIDE.md** | Model testing guide | Developers, testers |
 | **INDEX.md** | This file - navigation guide | Everyone |
 
 ---
@@ -42,6 +43,7 @@ Complete guide to all files and documentation in this project.
 | File | Lines | Purpose |
 |------|-------|---------|
 | `main.py` | ~200 | Application entry point, initialization |
+| `test_model_live.py` | ~550 | Live model testing with bounding boxes |
 
 ### Core Modules (`core/`)
 
@@ -198,6 +200,8 @@ Project_Graduation/
 | **Add database features** | `core/database.py` |
 | **Debug camera issues** | `core/camera.py` |
 | **Fix serial communication** | `core/hardware.py` |
+| **Test model with camera** | `test_model_live.py` |
+| **See bounding boxes** | `test_model_live.py` |
 
 ---
 

@@ -1,6 +1,6 @@
 """
 AI Engine for Coca-Cola Sorting System
-Uses NCNN model for real-time bottle inspection
+Uses YOLOv8 model (.pt) for real-time bottle inspection
 Implements strict sorting logic based on defect detection and component verification
 """
 
@@ -8,18 +8,20 @@ import cv2
 import numpy as np
 import os
 import random
+import time
 
 try:
-    import ncnn
-    NCNN_AVAILABLE = True
+    from ultralytics import YOLO
+    YOLO_AVAILABLE = True
 except ImportError:
-    NCNN_AVAILABLE = False
-    print("[WARNING] NCNN library not available. Using dummy predictions for testing.")
+    YOLO_AVAILABLE = False
+    print("[WARNING] ultralytics library not available. Using dummy predictions for testing.")
+    print("         Install with: pip install ultralytics")
 
 
 class AIEngine:
     """
-    AI Engine for bottle classification using NCNN model
+    AI Engine for bottle classification using YOLOv8 model
     
     Class Mapping (0-7):
     - 0: Cap-Defect
@@ -36,12 +38,12 @@ class AIEngine:
     - OK only if: NO defects AND has cap, filled, and label
     """
     
-    def __init__(self, model_path="model/best_ncnn_model"):
+    def __init__(self, model_path="model/best.pt"):
         """
-        Initialize AI Engine with NCNN model
+        Initialize AI Engine with YOLOv8 model
         
         Args:
-            model_path: Path to NCNN model directory
+            model_path: Path to YOLOv8 .pt model file
         """
         self.class_names = [
             'Cap-Defect',       # 0
@@ -63,38 +65,35 @@ class AIEngine:
         self.confidence_threshold = 0.5
         self.input_size = 640  # Model trained on 640x640 images
         
-        self.net = None
+        self.model = None
         self.model_loaded = False
+        self.model_path = model_path
         
-        if NCNN_AVAILABLE:
+        if YOLO_AVAILABLE:
             self._load_model(model_path)
         else:
-            print("[AI] Running in DEMO mode (NCNN not installed)")
+            print("[AI] Running in DEMO mode (YOLOv8 not installed)")
     
     def _load_model(self, model_path):
-        """Load NCNN model from param and bin files"""
+        """Load YOLOv8 model from .pt file"""
         try:
-            param_file = os.path.join(model_path, "model.ncnn.param")
-            bin_file = os.path.join(model_path, "model.ncnn.bin")
-            
-            if not os.path.exists(param_file) or not os.path.exists(bin_file):
-                print(f"[ERROR] Model files not found at {model_path}")
+            if not os.path.exists(model_path):
+                print(f"[ERROR] Model file not found at {model_path}")
                 return
             
-            self.net = ncnn.Net()
-            self.net.load_param(param_file)
-            self.net.load_model(bin_file)
+            print(f"[AI] Loading YOLOv8 model from {model_path}...")
+            self.model = YOLO(model_path)
             
             self.model_loaded = True
-            print(f"[AI] NCNN model loaded successfully from {model_path}")
+            print(f"[AI] YOLOv8 model loaded successfully!")
             
         except Exception as e:
-            print(f"[ERROR] Failed to load NCNN model: {e}")
+            print(f"[ERROR] Failed to load YOLOv8 model: {e}")
             self.model_loaded = False
     
-    def predict(self, frame):
+    def predict_single(self, frame):
         """
-        Predict bottle quality from image frame
+        Predict bottle quality from a single image frame
         
         Args:
             frame: OpenCV image (BGR format)
@@ -107,21 +106,57 @@ class AIEngine:
                 'has_cap': bool,
                 'has_filled': bool,
                 'has_label': bool,
-                'defects_found': list
+                'defects_found': list,
+                'annotated_image': frame with bounding boxes drawn
             }
         """
-        if not NCNN_AVAILABLE or not self.model_loaded:
-            return self._dummy_predict()
+        if not YOLO_AVAILABLE or not self.model_loaded:
+            return self._dummy_predict(frame)
         
         try:
-            # Preprocess image
-            img = self._preprocess(frame)
+            # Run YOLOv8 inference
+            results = self.model(frame, conf=self.confidence_threshold, verbose=False)[0]
             
-            # Run inference
-            detections = self._inference(img)
+            # Parse detections
+            detections = []
+            detected_classes = set()
+            defects_found = []
+            
+            # Get boxes, classes, and confidences
+            if results.boxes is not None and len(results.boxes) > 0:
+                for box in results.boxes:
+                    class_id = int(box.cls[0])
+                    confidence = float(box.conf[0])
+                    bbox = box.xyxy[0].cpu().numpy()  # [x1, y1, x2, y2]
+                    
+                    if class_id < len(self.class_names):
+                        class_name = self.class_names[class_id]
+                        detected_classes.add(class_id)
+                        
+                        detections.append({
+                            'class': class_name,
+                            'class_id': class_id,
+                            'confidence': f"{confidence:.2f}",
+                            'bbox': bbox.tolist()
+                        })
+                        
+                        # Check for defects
+                        if class_id in self.defect_classes:
+                            defects_found.append(class_name)
+            
+            # Component checks
+            has_cap = 4 in detected_classes
+            has_filled = 6 in detected_classes
+            has_label = 7 in detected_classes
+            
+            # Draw bounding boxes on frame
+            annotated_frame = self.draw_detections(frame.copy(), detections)
             
             # Apply sorting logic
-            result = self._apply_sorting_logic(detections)
+            result = self._apply_sorting_logic_internal(
+                defects_found, has_cap, has_filled, has_label, detections
+            )
+            result['annotated_image'] = annotated_frame
             
             return result
             
@@ -134,136 +169,87 @@ class AIEngine:
                 'has_cap': False,
                 'has_filled': False,
                 'has_label': False,
-                'defects_found': []
+                'defects_found': [],
+                'annotated_image': frame
             }
     
-    def _preprocess(self, frame):
+    def predict_multiple(self, frames):
         """
-        Preprocess image for NCNN model
-        - Resize to 640x640
-        - Normalize pixel values
-        """
-        # Resize to model input size
-        img = cv2.resize(frame, (self.input_size, self.input_size))
+        Predict from multiple frames and return best result
         
-        # Convert BGR to RGB
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        
-        return img
-    
-    def _inference(self, img):
-        """
-        Run NCNN inference on preprocessed image
+        Args:
+            frames: List of OpenCV images
         
         Returns:
-            List of detections: [(class_id, confidence, x, y, w, h), ...]
+            dict: Combined result with best annotated image
         """
-        detections = []
+        if not frames:
+            return self.predict_single(np.zeros((640, 640, 3), dtype=np.uint8))
         
-        try:
-            # Create NCNN Mat from numpy array
-            mat_in = ncnn.Mat.from_pixels(
-                img,
-                ncnn.Mat.PixelType.PIXEL_RGB,
-                img.shape[1],
-                img.shape[0]
-            )
-            
-            # Normalize (assuming model expects 0-1 range)
-            mat_in.substract_mean_normalize([0, 0, 0], [1/255.0, 1/255.0, 1/255.0])
-            
-            # Create extractor
-            ex = self.net.create_extractor()
-            ex.input("in0", mat_in)
-            
-            # Get output
-            ret, mat_out = ex.extract("out0")
-            
-            if ret == 0:
-                # Parse detections (YOLO format)
-                detections = self._parse_yolo_output(mat_out)
-            
-        except Exception as e:
-            print(f"[ERROR] Inference error: {e}")
+        results = []
+        for frame in frames:
+            result = self.predict_single(frame)
+            results.append(result)
         
-        return detections
+        # Find frame with most detections
+        best_idx = 0
+        max_detections = len(results[0]['detections'])
+        
+        for i, result in enumerate(results):
+            if len(result['detections']) > max_detections:
+                max_detections = len(result['detections'])
+                best_idx = i
+        
+        # Use best frame's result
+        best_result = results[best_idx]
+        
+        # Combine detections from all frames for decision
+        all_detected_classes = set()
+        all_defects = []
+        
+        for result in results:
+            for det in result['detections']:
+                all_detected_classes.add(det['class_id'])
+                if det['class_id'] in self.defect_classes:
+                    all_defects.append(det['class'])
+        
+        # Recompute final decision based on all frames
+        has_cap = 4 in all_detected_classes
+        has_filled = 6 in all_detected_classes
+        has_label = 7 in all_detected_classes
+        all_defects = list(set(all_defects))  # Remove duplicates
+        
+        final_result = self._apply_sorting_logic_internal(
+            all_defects, has_cap, has_filled, has_label, best_result['detections']
+        )
+        final_result['annotated_image'] = best_result['annotated_image']
+        
+        return final_result
     
-    def _parse_yolo_output(self, mat_out):
+    def predict(self, frame):
         """
-        Parse YOLO NCNN output to detection list
+        Main predict function (for backward compatibility)
+        Captures multiple frames if frame is from camera
         
-        Note: This is a simplified parser. Adjust based on actual model output format.
+        Args:
+            frame: OpenCV image or Camera object
+        
+        Returns:
+            dict: Prediction result
         """
-        detections = []
-        
-        try:
-            # Convert Mat to numpy array
-            out = np.array(mat_out)
-            
-            # YOLO output format: [batch, num_detections, (x, y, w, h, conf, cls_conf...)]
-            # Parse each detection
-            for detection in out:
-                if len(detection) >= 6:
-                    x, y, w, h, conf = detection[:5]
-                    class_scores = detection[5:]
-                    
-                    if conf > self.confidence_threshold:
-                        class_id = np.argmax(class_scores)
-                        class_conf = class_scores[class_id]
-                        
-                        if class_conf > self.confidence_threshold:
-                            detections.append({
-                                'class_id': int(class_id),
-                                'confidence': float(class_conf),
-                                'bbox': [float(x), float(y), float(w), float(h)]
-                            })
-        
-        except Exception as e:
-            print(f"[ERROR] Parse output error: {e}")
-        
-        return detections
+        # For now, just predict single frame
+        return self.predict_single(frame)
     
-    def _apply_sorting_logic(self, detections):
+    def _apply_sorting_logic_internal(self, defects_found, has_cap, has_filled, has_label, detections):
         """
         Apply strict sorting logic based on detections
-        
-        CRITICAL SORTING RULES:
-        1. If ANY defect detected (class 0-3) -> NG
-        2. If missing cap (4), filled (6), or label (7) -> NG
-        3. Only OK if: NO defects AND has all required components
         """
-        # Track what we found
-        detected_classes = set()
-        defects_found = []
-        all_detections = []
-        
-        # Analyze detections
-        for det in detections:
-            class_id = det['class_id']
-            confidence = det['confidence']
-            class_name = self.class_names[class_id]
-            
-            detected_classes.add(class_id)
-            all_detections.append({
-                'class': class_name,
-                'confidence': f"{confidence:.2f}"
-            })
-            
-            # Check for defects
-            if class_id in self.defect_classes:
-                defects_found.append(class_name)
-        
-        # Component checks
-        has_cap = 4 in detected_classes
-        has_filled = 6 in detected_classes
-        has_label = 7 in detected_classes
-        
         # RULE 1: Any defect -> NG
         if defects_found:
             return {
                 'result': 'NG',
                 'reason': f'Defects detected: {", ".join(defects_found)}',
-                'detections': all_detections,
+                'detections': detections,
                 'has_cap': has_cap,
                 'has_filled': has_filled,
                 'has_label': has_label,
@@ -283,7 +269,7 @@ class AIEngine:
             return {
                 'result': 'NG',
                 'reason': f'Missing components: {", ".join(missing_components)}',
-                'detections': all_detections,
+                'detections': detections,
                 'has_cap': has_cap,
                 'has_filled': has_filled,
                 'has_label': has_label,
@@ -294,47 +280,62 @@ class AIEngine:
         return {
             'result': 'OK',
             'reason': 'All components present, no defects',
-            'detections': all_detections,
+            'detections': detections,
             'has_cap': True,
             'has_filled': True,
             'has_label': True,
             'defects_found': []
         }
     
-    def _dummy_predict(self):
+    def _dummy_predict(self, frame):
         """
-        Dummy prediction for testing when NCNN is not available
-        Returns random OK/NG results for UI testing
+        Dummy prediction for testing when YOLOv8 is not available
         """
         # Random decision (70% OK, 30% NG)
         is_ok = random.random() > 0.3
         
+        # Draw some dummy boxes
+        annotated_frame = frame.copy()
+        h, w = frame.shape[:2]
+        
         if is_ok:
+            # Draw dummy component boxes
+            cv2.rectangle(annotated_frame, (w//4, h//4), (w//2, h//2), (0, 255, 0), 2)
+            cv2.putText(annotated_frame, "cap: 0.95", (w//4, h//4-10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            
             return {
                 'result': 'OK',
                 'reason': '[DEMO] All components present, no defects',
                 'detections': [
-                    {'class': 'cap', 'confidence': '0.95'},
-                    {'class': 'label', 'confidence': '0.92'},
-                    {'class': 'filled', 'confidence': '0.88'}
+                    {'class': 'cap', 'class_id': 4, 'confidence': '0.95'},
+                    {'class': 'label', 'class_id': 7, 'confidence': '0.92'},
+                    {'class': 'filled', 'class_id': 6, 'confidence': '0.88'}
                 ],
                 'has_cap': True,
                 'has_filled': True,
                 'has_label': True,
-                'defects_found': []
+                'defects_found': [],
+                'annotated_image': annotated_frame
             }
         else:
+            # Draw dummy defect box
+            cv2.rectangle(annotated_frame, (w//3, h//3), (2*w//3, 2*h//3), (0, 0, 255), 2)
             defect = random.choice(['Cap-Defect', 'Label-Defect', 'Filling-Defect'])
+            cv2.putText(annotated_frame, f"{defect}: 0.87", (w//3, h//3-10),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+            
             return {
                 'result': 'NG',
                 'reason': f'[DEMO] Defect detected: {defect}',
                 'detections': [
-                    {'class': defect, 'confidence': '0.87'}
+                    {'class': defect, 'class_id': 0, 'confidence': '0.87'}
                 ],
                 'has_cap': False,
                 'has_filled': True,
                 'has_label': True,
-                'defects_found': [defect]
+                'defects_found': [defect],
+                'annotated_image': annotated_frame
             }
     
     def draw_detections(self, frame, detections):
@@ -349,19 +350,32 @@ class AIEngine:
             frame: Annotated image
         """
         for det in detections:
+            class_id = det['class_id']
+            class_name = det['class']
+            confidence = det['confidence']
+            
             if 'bbox' in det:
-                x, y, w, h = det['bbox']
-                class_name = self.class_names[det['class_id']]
-                confidence = det['confidence']
+                bbox = det['bbox']
+                x1, y1, x2, y2 = map(int, bbox)
+                
+                # Choose color: Red for defects, Green for components
+                color = (0, 0, 255) if class_id in self.defect_classes else (0, 255, 0)
                 
                 # Draw box
-                color = (0, 0, 255) if det['class_id'] in self.defect_classes else (0, 255, 0)
-                cv2.rectangle(frame, (int(x), int(y)), (int(x+w), int(y+h)), color, 2)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
                 
                 # Draw label
-                label = f"{class_name}: {confidence:.2f}"
-                cv2.putText(frame, label, (int(x), int(y)-10),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+                label = f"{class_name}: {confidence}"
+                (text_width, text_height), baseline = cv2.getTextSize(
+                    label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2
+                )
+                
+                # Background for text
+                cv2.rectangle(frame, (x1, y1 - text_height - 10), 
+                            (x1 + text_width, y1), color, -1)
+                
+                # Text
+                cv2.putText(frame, label, (x1, y1 - 5),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
         
         return frame
-

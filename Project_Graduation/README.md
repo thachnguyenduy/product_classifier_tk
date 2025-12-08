@@ -88,6 +88,23 @@ Edit `main.py` if your Arduino is on a different port:
 python3 main.py
 ```
 
+### Test Model Only (Without Arduino)
+
+Want to test AI model with live camera and see bounding boxes?
+
+```bash
+python3 test_model_live.py
+```
+
+This will:
+- Show live camera feed
+- Run AI detection in real-time
+- Draw bounding boxes with class names
+- Display confidence scores
+- Show FPS and performance metrics
+
+**Controls**: Q (quit), S (screenshot), SPACE (pause)
+
 ### Testing Without Hardware
 
 Edit `main.py` to enable dummy modes:

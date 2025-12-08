@@ -45,7 +45,7 @@ class SortingSystemApp:
             'camera_height': 480,
             'arduino_port': '/dev/ttyUSB0',  # Change to 'COM3' on Windows
             'arduino_baudrate': 9600,
-            'model_path': 'model/best_ncnn_model',
+            'model_path': 'model/best.pt',  # YOLOv8 model file
             'use_dummy_camera': False,  # Set True for testing without camera
             'use_dummy_hardware': False  # Set True for testing without Arduino
         }
