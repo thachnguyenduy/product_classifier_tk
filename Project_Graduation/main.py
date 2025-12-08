@@ -38,17 +38,31 @@ class SortingSystemApp:
         self.database = None
         self.main_window = None
         
-        # Configuration
-        self.config = {
-            'camera_id': 0,  # Change to video file path if using recorded video
-            'camera_width': 640,
-            'camera_height': 480,
-            'arduino_port': '/dev/ttyUSB0',  # Change to 'COM3' on Windows
-            'arduino_baudrate': 9600,
-            'model_path': 'model/best.pt',  # YOLOv8 model file
-            'use_dummy_camera': False,  # Set True for testing without camera
-            'use_dummy_hardware': False  # Set True for testing without Arduino
-        }
+        # Configuration (ưu tiên đọc từ config.py)
+        try:
+            import config
+            self.config = {
+                'camera_id': getattr(config, 'CAMERA_ID', 0),
+                'camera_width': getattr(config, 'CAMERA_WIDTH', 640),
+                'camera_height': getattr(config, 'CAMERA_HEIGHT', 480),
+                'arduino_port': getattr(config, 'ARDUINO_PORT', '/dev/ttyUSB0'),
+                'arduino_baudrate': getattr(config, 'ARDUINO_BAUDRATE', 9600),
+                'model_path': getattr(config, 'MODEL_PATH', 'model/best.pt'),
+                'use_dummy_camera': getattr(config, 'USE_DUMMY_CAMERA', False),
+                'use_dummy_hardware': getattr(config, 'USE_DUMMY_HARDWARE', False),
+            }
+        except ImportError:
+            # Fallback nếu không có file config.py
+            self.config = {
+                'camera_id': 0,
+                'camera_width': 640,
+                'camera_height': 480,
+                'arduino_port': '/dev/ttyUSB0',
+                'arduino_baudrate': 9600,
+                'model_path': 'model/best.pt',
+                'use_dummy_camera': False,
+                'use_dummy_hardware': False,
+            }
     
     def initialize_components(self):
         """Initialize all system components"""

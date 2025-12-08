@@ -73,19 +73,19 @@ class MainWindow:
         main_frame.columnconfigure(1, weight=1)  # Middle image
         main_frame.columnconfigure(2, weight=0)  # Right panel (fixed width)
         
-        # === LEFT IMAGE - Ảnh gốc ===
+        # === LEFT IMAGE - Ảnh sau khi nhận diện (annotated) ===
         left_frame = tk.Frame(main_frame, bg='lightgray', relief=tk.SOLID, borderwidth=2)
         left_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
         
-        self.left_image_label = tk.Label(left_frame, bg='gray')
-        self.left_image_label.pack(fill=tk.BOTH, expand=True)
+        self.annotated_image_label = tk.Label(left_frame, bg='gray')
+        self.annotated_image_label.pack(fill=tk.BOTH, expand=True)
         
-        # === MIDDLE IMAGE - Ảnh có bounding boxes ===
+        # === MIDDLE IMAGE - Live camera stream ===
         middle_frame = tk.Frame(main_frame, bg='lightgray', relief=tk.SOLID, borderwidth=2)
         middle_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
         
-        self.middle_image_label = tk.Label(middle_frame, bg='gray')
-        self.middle_image_label.pack(fill=tk.BOTH, expand=True)
+        self.live_image_label = tk.Label(middle_frame, bg='gray')
+        self.live_image_label.pack(fill=tk.BOTH, expand=True)
         
         # === RIGHT PANEL - Controls và Results ===
         right_frame = tk.Frame(main_frame, bg='white', width=350)
@@ -201,7 +201,7 @@ class MainWindow:
         self.exit_button.pack(fill=tk.X)
     
     def _update_video(self):
-        """Update video feed - chỉ hiển thị ở ảnh trái"""
+        """Update video feed - hiển thị live ở cột giữa (bên phải theo yêu cầu)"""
         if self.camera and self.camera.is_opened():
             frame = self.camera.read()
             
@@ -213,8 +213,9 @@ class MainWindow:
                 img = Image.fromarray(display_frame)
                 photo = ImageTk.PhotoImage(image=img)
                 
-                self.left_image_label.config(image=photo)
-                self.left_image_label.image = photo
+                # Hiển thị live stream ở cột giữa
+                self.live_image_label.config(image=photo)
+                self.live_image_label.image = photo
         
         # Schedule next update
         self.root.after(33, self._update_video)  # ~30 FPS
@@ -336,25 +337,18 @@ class MainWindow:
     
     def _display_result(self, original_frame, annotated_frame, result, processing_time):
         """Hiển thị kết quả theo thiết kế mới"""
-        # LEFT IMAGE - Ảnh gốc (không có bounding box)
-        display_left = cv2.cvtColor(original_frame, cv2.COLOR_BGR2RGB)
-        display_left = cv2.resize(display_left, (540, 760))
+        # LEFT IMAGE - Ảnh có bounding boxes (sau nhận diện)
+        display_annotated = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
+        display_annotated = cv2.resize(display_annotated, (540, 760))
         
-        img_left = Image.fromarray(display_left)
-        photo_left = ImageTk.PhotoImage(image=img_left)
+        img_ann = Image.fromarray(display_annotated)
+        photo_ann = ImageTk.PhotoImage(image=img_ann)
         
-        self.left_image_label.config(image=photo_left)
-        self.left_image_label.image = photo_left
+        self.annotated_image_label.config(image=photo_ann)
+        self.annotated_image_label.image = photo_ann
         
-        # MIDDLE IMAGE - Ảnh có bounding boxes
-        display_middle = cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB)
-        display_middle = cv2.resize(display_middle, (540, 760))
-        
-        img_middle = Image.fromarray(display_middle)
-        photo_middle = ImageTk.PhotoImage(image=img_middle)
-        
-        self.middle_image_label.config(image=photo_middle)
-        self.middle_image_label.image = photo_middle
+        # RIGHT/MIDDLE IMAGE - Live stream giữ nguyên (đã update ở _update_video)
+        # Không cần cập nhật lại tại đây để tránh giật hình
         
         # RIGHT PANEL - Hiển thị kết quả
         

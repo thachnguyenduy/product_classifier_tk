@@ -75,6 +75,10 @@ class AIEngine:
         self.confidence_threshold = getattr(config, 'CONFIDENCE_THRESHOLD', 0.3)
         self.input_size = 640  # Model trained on 640x640 images
         self.debug_mode = getattr(config, 'DEBUG_MODE', True)
+        self.require_cap = getattr(config, 'REQUIRE_CAP', True)
+        self.require_filled = getattr(config, 'REQUIRE_FILLED', True)
+        self.require_label = getattr(config, 'REQUIRE_LABEL', True)
+        self.save_debug = getattr(config, 'SAVE_DEBUG_IMAGES', False)
         
         self.model = None
         self.model_loaded = False
@@ -172,6 +176,12 @@ class AIEngine:
                 defects_found, has_cap, has_filled, has_label, detections
             )
             result['annotated_image'] = annotated_frame
+
+            # Save debug image if needed
+            if self.save_debug:
+                os.makedirs("captures/debug", exist_ok=True)
+                ts = int(time.time() * 1000)
+                cv2.imwrite(f"captures/debug/debug_{ts}.jpg", annotated_frame)
             
             return result
             
@@ -283,11 +293,11 @@ class AIEngine:
         
         # RULE 2: Missing required components -> NG
         missing_components = []
-        if not has_cap:
+        if self.require_cap and not has_cap:
             missing_components.append('cap')
-        if not has_filled:
+        if self.require_filled and not has_filled:
             missing_components.append('filled')
-        if not has_label:
+        if self.require_label and not has_label:
             missing_components.append('label')
         
         if missing_components:

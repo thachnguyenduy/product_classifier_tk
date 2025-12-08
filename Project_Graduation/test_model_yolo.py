@@ -11,15 +11,10 @@ import time
 import os
 
 # Kiểm tra YOLOv8
-try:
-    from ultralytics import YOLO
-    YOLO_AVAILABLE = True
-    print("✓ YOLOv8 (ultralytics) available")
-except ImportError:
-    YOLO_AVAILABLE = False
-    print("✗ YOLOv8 not available - Install ultralytics")
-    print("  Run: pip install ultralytics")
-    exit(1)
+from ultralytics import YOLO
+
+
+
 
 # ============================================
 # CẤU HÌNH
