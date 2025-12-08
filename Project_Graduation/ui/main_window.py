@@ -362,25 +362,40 @@ class MainWindow:
         for widget in self.result_display_frame.winfo_children():
             widget.destroy()
         
-        # Show result button
+        # Show result button với lý do
         if result['result'] == 'OK':
             result_text = "KẾT QUẢ"
             result_bg = '#4CAF50'  # Green
+            reason_text = result.get('reason', 'Đạt tiêu chuẩn')
         else:
             result_text = "HÀNG BỊ LỖI"
             result_bg = '#f44336'  # Red
+            reason_text = result.get('reason', 'Không đạt')
         
+        # Main result button
         self.result_button = tk.Button(
             self.result_display_frame,
             text=result_text,
-            font=('Arial', 20, 'bold'),
+            font=('Arial', 18, 'bold'),
             bg=result_bg,
             fg='white',
             relief=tk.RAISED,
             borderwidth=3,
-            height=3
+            height=2
         )
-        self.result_button.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.result_button.pack(fill=tk.X, expand=False, padx=10, pady=(10, 5))
+        
+        # Reason label (hiển thị lý do)
+        reason_label = tk.Label(
+            self.result_display_frame,
+            text=reason_text,
+            font=('Arial', 10),
+            bg='white',
+            fg='gray',
+            wraplength=280,
+            justify=tk.CENTER
+        )
+        reason_label.pack(fill=tk.X, padx=10, pady=(0, 10))
         
         # Update time display
         self.time_label.config(text=f"{processing_time:.2f}")

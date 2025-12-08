@@ -18,6 +18,15 @@ except ImportError:
     print("[WARNING] ultralytics library not available. Using dummy predictions for testing.")
     print("         Install with: pip install ultralytics")
 
+# Import config
+try:
+    import config
+except ImportError:
+    # Default values if config not found
+    class config:
+        CONFIDENCE_THRESHOLD = 0.3
+        DEBUG_MODE = True
+
 
 class AIEngine:
     """
@@ -62,8 +71,10 @@ class AIEngine:
         # Defect classes that trigger rejection
         self.defect_classes = {0, 1, 2, 3}
         
-        self.confidence_threshold = 0.5
+        # Load from config
+        self.confidence_threshold = getattr(config, 'CONFIDENCE_THRESHOLD', 0.3)
         self.input_size = 640  # Model trained on 640x640 images
+        self.debug_mode = getattr(config, 'DEBUG_MODE', True)
         
         self.model = None
         self.model_loaded = False
@@ -139,6 +150,10 @@ class AIEngine:
                             'confidence': f"{confidence:.2f}",
                             'bbox': bbox.tolist()
                         })
+                        
+                        # DEBUG: Print detection
+                        if self.debug_mode:
+                            print(f"[AI] Detected: {class_name} (conf: {confidence:.2f})")
                         
                         # Check for defects
                         if class_id in self.defect_classes:
@@ -244,11 +259,21 @@ class AIEngine:
         """
         Apply strict sorting logic based on detections
         """
+        # DEBUG: Print component status
+        if self.debug_mode:
+            print(f"[AI] Components check:")
+            print(f"     - Cap: {'✓' if has_cap else '✗'}")
+            print(f"     - Filled: {'✓' if has_filled else '✗'}")
+            print(f"     - Label: {'✓' if has_label else '✗'}")
+            print(f"     - Defects: {defects_found if defects_found else 'None'}")
+        
         # RULE 1: Any defect -> NG
         if defects_found:
+            if self.debug_mode:
+                print(f"[AI] Result: NG (Defects found)")
             return {
                 'result': 'NG',
-                'reason': f'Defects detected: {", ".join(defects_found)}',
+                'reason': f'Lỗi: {", ".join(defects_found)}',
                 'detections': detections,
                 'has_cap': has_cap,
                 'has_filled': has_filled,
@@ -266,9 +291,11 @@ class AIEngine:
             missing_components.append('label')
         
         if missing_components:
+            if self.debug_mode:
+                print(f"[AI] Result: NG (Missing: {', '.join(missing_components)})")
             return {
                 'result': 'NG',
-                'reason': f'Missing components: {", ".join(missing_components)}',
+                'reason': f'Thiếu: {", ".join(missing_components)}',
                 'detections': detections,
                 'has_cap': has_cap,
                 'has_filled': has_filled,
@@ -277,9 +304,11 @@ class AIEngine:
             }
         
         # RULE 3: No defects + all components -> OK
+        if self.debug_mode:
+            print(f"[AI] Result: OK (All components present)")
         return {
             'result': 'OK',
-            'reason': 'All components present, no defects',
+            'reason': 'Đạt tiêu chuẩn, không có lỗi',
             'detections': detections,
             'has_cap': True,
             'has_filled': True,
