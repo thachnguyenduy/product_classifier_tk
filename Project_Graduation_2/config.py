@@ -17,6 +17,12 @@ CONFIDENCE_THRESHOLD = 0.3  # Mặc định: 0.3
 # - Dùng YOLOv8: "model/best.pt"
 MODEL_PATH = "model/best_ncnn_model"
 
+# NMS (Non-Maximum Suppression) threshold (0.0 - 1.0)
+# Loại bỏ các bounding boxes chồng lấn
+# - Giảm xuống (0.3-0.4): Loại bỏ NHIỀU boxes chồng lấn hơn (strict)
+# - Tăng lên (0.5-0.6): Giữ lại NHIỀU boxes hơn (lỏng)
+NMS_THRESHOLD = 0.45  # Mặc định: 0.45
+
 # ============================================
 # SORTING LOGIC SETTINGS
 # ============================================

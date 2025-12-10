@@ -323,6 +323,12 @@ class AIEngine:
             scale_x = img_w / self.input_size
             scale_y = img_h / self.input_size
             num_boxes = out_np.shape[0]
+            
+            # Collect all boxes first (before NMS)
+            boxes_for_nms = []
+            confidences_for_nms = []
+            class_ids_for_nms = []
+            
             for i in range(num_boxes):
                 det = out_np[i]
                 if len(det) < 4 + len(self.class_names):
@@ -342,16 +348,45 @@ class AIEngine:
                 x2 = max(0, min(x2, img_w)); y2 = max(0, min(y2, img_h))
                 if x2 <= x1 or y2 <= y1:
                     continue
-                detections.append({
-                    'class': self.class_names[class_id],
-                    'class_id': class_id,
-                    'confidence': f"{confidence:.2f}",
-                    'bbox': [x1, y1, x2, y2]
-                })
-                if self.debug_mode:
-                    print(f"[AI][NCNN] Detected: {self.class_names[class_id]} (conf: {confidence:.2f})")
+                
+                # Store for NMS
+                boxes_for_nms.append([x1, y1, x2 - x1, y2 - y1])  # [x, y, w, h]
+                confidences_for_nms.append(confidence)
+                class_ids_for_nms.append(class_id)
+            
+            # Apply NMS to remove overlapping boxes
+            if len(boxes_for_nms) > 0:
+                nms_threshold = getattr(config, 'NMS_THRESHOLD', 0.45)
+                indices = cv2.dnn.NMSBoxes(
+                    boxes_for_nms,
+                    confidences_for_nms,
+                    self.confidence_threshold,
+                    nms_threshold
+                )
+                
+                # Keep only boxes that passed NMS
+                if len(indices) > 0:
+                    for i in indices.flatten():
+                        class_id = class_ids_for_nms[i]
+                        confidence = confidences_for_nms[i]
+                        box = boxes_for_nms[i]
+                        x1, y1, w, h = box
+                        x2 = x1 + w
+                        y2 = y1 + h
+                        
+                        detections.append({
+                            'class': self.class_names[class_id],
+                            'class_id': class_id,
+                            'confidence': f"{confidence:.2f}",
+                            'bbox': [int(x1), int(y1), int(x2), int(y2)]
+                        })
+                        if self.debug_mode:
+                            print(f"[AI][NCNN] Detected: {self.class_names[class_id]} (conf: {confidence:.2f})")
+                            
         except Exception as e:
             print(f"[ERROR] Parse NCNN output: {e}")
+            import traceback
+            traceback.print_exc()
         return detections
     
     def predict(self, frame):
