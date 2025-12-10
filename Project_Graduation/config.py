@@ -1,73 +1,145 @@
 """
-Configuration File - Coca-Cola Sorting System
-Điều chỉnh các tham số ở đây
+Configuration file for Coca-Cola Sorting System (CONTINUOUS MODE)
+Adjust these parameters to tune system performance
 """
 
-# ============================================
-# AI MODEL SETTINGS
-# ============================================
+# ============================================================================
+# AI MODEL CONFIGURATION
+# ============================================================================
 
-# Confidence threshold (0.0 - 1.0)
-# - Giảm xuống (0.2-0.3): Detect nhiều hơn, có thể bị false positive
-# - Tăng lên (0.5-0.7): Chỉ detect chắc chắn, có thể bị miss
-CONFIDENCE_THRESHOLD = 0.3  # Mặc định: 0.3
+# Model path (NCNN format)
+MODEL_PATH = "model/best_ncnn_model"  # Folder containing .param and .bin files
 
-# Model path
-MODEL_PATH = "model/best.pt"
+# Detection confidence threshold (0.0 - 1.0)
+# Lower = more detections (may include false positives)
+# Higher = fewer detections (may miss some objects)
+CONFIDENCE_THRESHOLD = 0.5
 
-# ============================================
-# SORTING LOGIC SETTINGS
-# ============================================
+# NMS (Non-Maximum Suppression) threshold (0.0 - 1.0)
+# Lower = remove more overlapping boxes (strict)
+# Higher = keep more overlapping boxes (loose)
+NMS_THRESHOLD = 0.45
 
-# Yêu cầu phải có đủ các components này
-REQUIRE_CAP = True      # Phải có nắp
-REQUIRE_FILLED = True   # Phải đổ đầy
-REQUIRE_LABEL = True    # Phải có nhãn
+# Class names (must match model training)
+CLASS_NAMES = [
+    'Cap-Defect',      # 0
+    'Filling-Defect',  # 1
+    'Label-Defect',    # 2
+    'Wrong-Product',   # 3
+    'cap',             # 4
+    'coca',            # 5
+    'filled',          # 6
+    'label'            # 7
+]
 
-# Nếu muốn "lỏng" hơn, có thể set False cho một số components
-# VD: REQUIRE_LABEL = False  # Không bắt buộc phải có nhãn
+# Defect classes (indices)
+DEFECT_CLASSES = [0, 1, 2, 3]
 
-# ============================================
-# CAPTURE SETTINGS
-# ============================================
+# Required component classes (indices)
+REQUIRED_COMPONENTS = {
+    'cap': 4,
+    'filled': 6,
+    'label': 7
+}
 
-# Số ảnh chụp khi detect chai
-NUM_CAPTURE_FRAMES = 5
+# ============================================================================
+# SORTING LOGIC
+# ============================================================================
 
-# Delay giữa các ảnh (seconds)
-FRAME_DELAY = 0.1  # 100ms
+# Require specific components for OK classification
+REQUIRE_CAP = True
+REQUIRE_FILLED = True
+REQUIRE_LABEL = True
 
-# ============================================
-# CAMERA SETTINGS
-# ============================================
+# ============================================================================
+# CAMERA CONFIGURATION
+# ============================================================================
 
-CAMERA_ID = 0  # 0 = camera mặc định
+CAMERA_ID = 0  # 0 for /dev/video0, 1 for /dev/video1, etc.
 CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
+CAMERA_FPS = 30
 
-# ============================================
-# ARDUINO SETTINGS
-# ============================================
+# Manual exposure setting (important for moving conveyor)
+# Negative values = shorter exposure = less motion blur
+# Range typically -13 to 0 (camera dependent)
+CAMERA_EXPOSURE = -4  # Adjust based on lighting conditions
 
-ARDUINO_PORT = '/dev/ttyUSB0'  # Linux
-# ARDUINO_PORT = 'COM3'  # Windows
+# Auto-exposure (set to False for manual exposure)
+CAMERA_AUTO_EXPOSURE = False
+
+# ============================================================================
+# HARDWARE CONFIGURATION
+# ============================================================================
+
+# Arduino serial port
+# Linux: '/dev/ttyUSB0' or '/dev/ttyACM0'
+# Windows: 'COM3', 'COM4', etc.
+ARDUINO_PORT = '/dev/ttyUSB0'
 ARDUINO_BAUDRATE = 9600
+ARDUINO_TIMEOUT = 0.1  # Short timeout for fast response
 
-# ============================================
-# TESTING MODE
-# ============================================
+# Travel time from sensor to servo (milliseconds)
+# CRITICAL: Must match Arduino's TRAVEL_TIME setting
+TRAVEL_TIME_MS = 4500
 
-# Bật dummy mode để test không cần hardware
-USE_DUMMY_CAMERA = False
-USE_DUMMY_HARDWARE = False
+# ============================================================================
+# CAPTURE CONFIGURATION
+# ============================================================================
 
-# ============================================
-# DEBUG SETTINGS
-# ============================================
+# Number of frames to capture per bottle (for voting/averaging)
+NUM_CAPTURE_FRAMES = 1  # In continuous mode, we capture quickly (no time for multiple frames)
 
-# Hiển thị debug info trong terminal
-DEBUG_MODE = True
+# Frame delay between captures (seconds)
+FRAME_DELAY = 0.05  # 50ms between frames if capturing multiple
 
-# Lưu ảnh debug
-SAVE_DEBUG_IMAGES = True
+# ============================================================================
+# DUMMY MODE (For testing without hardware)
+# ============================================================================
 
+USE_DUMMY_CAMERA = False  # True = use generated test images
+USE_DUMMY_HARDWARE = False  # True = simulate Arduino communication
+
+# ============================================================================
+# DEBUG & LOGGING
+# ============================================================================
+
+DEBUG_MODE = True  # Print detailed debug information
+SAVE_DEBUG_IMAGES = True  # Save annotated images to captures/debug/
+
+# Log file path
+LOG_FILE = "system.log"
+
+# ============================================================================
+# UI CONFIGURATION
+# ============================================================================
+
+# UI update rate (milliseconds)
+UI_UPDATE_INTERVAL = 33  # ~30 FPS
+
+# Display settings
+DISPLAY_WIDTH = 640
+DISPLAY_HEIGHT = 480
+
+# ============================================================================
+# DATABASE CONFIGURATION
+# ============================================================================
+
+DATABASE_PATH = "database/product.db"
+
+# ============================================================================
+# PERFORMANCE TUNING
+# ============================================================================
+
+# Maximum processing time warning threshold (seconds)
+MAX_PROCESSING_TIME = 1.0  # Warn if AI takes longer than this
+
+# Serial response timeout (seconds)
+SERIAL_RESPONSE_TIMEOUT = 0.05  # How long to wait before sending decision
+
+# ============================================================================
+# CALIBRATION
+# ============================================================================
+
+# Calibration mode (prints timing information)
+CALIBRATION_MODE = False

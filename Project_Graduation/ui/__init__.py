@@ -1,7 +1,5 @@
 """
-UI module for Coca-Cola Sorting System
-Contains Tkinter-based user interface components
+UI modules for Coca-Cola Sorting System
 """
 
-__version__ = "1.0.0"
-
+__version__ = "2.0.0"

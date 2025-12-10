@@ -1,7 +1,6 @@
 """
-Core module for Coca-Cola Sorting System
-Contains AI engine, camera handler, database, and hardware communication
+Core modules for Coca-Cola Sorting System
 """
 
-__version__ = "1.0.0"
-
+__version__ = "2.0.0"
+__author__ = "Coca-Cola Sorting Team"

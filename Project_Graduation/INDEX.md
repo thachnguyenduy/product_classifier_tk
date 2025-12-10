@@ -1,568 +1,368 @@
-# 📚 Project Index - Coca-Cola Sorting System
+# 📚 Project Index - Continuous Coca-Cola Sorting System
 
-Complete guide to all files and documentation in this project.
+Quick navigation guide to all project files and documentation.
 
 ---
 
 ## 🚀 Getting Started (Read These First)
 
-| File | Purpose | When to Read |
-|------|---------|--------------|
-| **README.md** | Main project documentation | Start here for overview |
-| **QUICK_START.md** | 5-minute quick start guide | When you want to run it fast |
-| **PROJECT_SUMMARY.md** | Complete project summary | For understanding scope |
+| File | Description | Priority |
+|------|-------------|----------|
+| **README.md** | Complete system documentation | ⭐⭐⭐ |
+| **QUICK_START.md** | 5-minute setup guide | ⭐⭐⭐ |
+| **CALIBRATION_GUIDE.md** | Detailed calibration instructions | ⭐⭐ |
+| **PROJECT_SUMMARY.md** | Technical overview | ⭐ |
 
 ---
 
-## 📖 Documentation Files
+## 💻 Source Code
 
-### Setup & Installation
-
-| File | Description | Target Audience |
-|------|-------------|-----------------|
-| **SETUP_GUIDE.md** | Complete setup guide (9 parts) | First-time installers |
-| **WINDOWS_SETUP.md** | Windows-specific instructions | Windows developers |
-| **QUICK_START.md** | Fast installation & run | Experienced users |
-
-### Technical Documentation
-
-| File | Description | Target Audience |
-|------|-------------|-----------------|
-| **ARCHITECTURE.md** | System architecture & design | Developers, reviewers |
-| **PROJECT_SUMMARY.md** | Complete project overview | Managers, evaluators |
-| **README.md** | Main documentation | Everyone |
-| **TEST_MODEL_GUIDE.md** | Model testing guide | Developers, testers |
-| **INDEX.md** | This file - navigation guide | Everyone |
-
----
-
-## 💻 Source Code Files
-
-### Main Application
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| `main.py` | ~200 | Application entry point, initialization |
-| `test_model_live.py` | ~550 | Live model testing with bounding boxes |
+### Main Entry Point
+| File | Lines | Description |
+|------|-------|-------------|
+| `main.py` | 215 | Application entry point, component initialization |
+| `config.py` | 82 | Configuration parameters (EDIT THIS!) |
 
 ### Core Modules (`core/`)
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| `core/__init__.py` | ~10 | Module initialization |
-| `core/ai.py` | ~400 | AI inference engine (NCNN) |
-| `core/camera.py` | ~300 | Threaded camera capture |
-| `core/database.py` | ~400 | SQLite database handler |
-| `core/hardware.py` | ~350 | Serial communication with Arduino |
+| File | Lines | Description |
+|------|-------|-------------|
+| `ai.py` | 450+ | NCNN AI engine with NMS |
+| `camera.py` | 275 | Threaded camera capture |
+| `hardware.py` | 318 | Serial communication with Arduino |
+| `database.py` | 360 | SQLite database handler |
+| `__init__.py` | 5 | Module initialization |
 
 ### User Interface (`ui/`)
+| File | Lines | Description |
+|------|-------|-------------|
+| `main_window.py` | 520+ | Main GUI (Control First strategy) |
+| `history_window.py` | 180 | Inspection history viewer |
+| `__init__.py` | 5 | Module initialization |
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| `ui/__init__.py` | ~10 | Module initialization |
-| `ui/main_window.py` | ~450 | Main control window (Tkinter) |
-| `ui/history_window.py` | ~300 | History viewer window |
-
-### Arduino Firmware (`arduino/`)
-
-| File | Lines | Purpose |
-|------|-------|---------|
-| `arduino/sorting_control.ino` | ~200 | Arduino C++ control code |
+### Arduino Code (`arduino/`)
+| File | Lines | Description |
+|------|-------|-------------|
+| `sorting_control.ino` | 152 | Circular buffer logic, conveyor control |
 
 ---
 
-## 🤖 AI Model Files (`model/`)
+## 📖 Documentation
 
-| File | Size | Purpose |
-|------|------|---------|
-| `model/best_ncnn_model/model.ncnn.param` | ~50KB | NCNN model structure |
-| `model/best_ncnn_model/model.ncnn.bin` | ~6MB | NCNN model weights |
-| `model/best_ncnn_model/metadata.yaml` | ~1KB | Class names & metadata |
-| `model/best_ncnn_model/model_ncnn.py` | ~5KB | Python inference wrapper |
+### User Guides
+| File | Purpose | When to Read |
+|------|---------|--------------|
+| **README.md** | Main documentation | Before starting |
+| **QUICK_START.md** | Fast setup | First time setup |
+| **CALIBRATION_GUIDE.md** | Fine-tuning | After initial setup |
+| **PROJECT_SUMMARY.md** | Technical details | For understanding internals |
+| **INDEX.md** | This file | For navigation |
 
----
-
-## 📁 Directory Structure
-
-```
-Project_Graduation/
-│
-├── 📄 Documentation (Markdown files)
-│   ├── README.md                  # Main documentation
-│   ├── QUICK_START.md             # Quick start guide
-│   ├── SETUP_GUIDE.md             # Complete setup (9 parts)
-│   ├── WINDOWS_SETUP.md           # Windows-specific guide
-│   ├── ARCHITECTURE.md            # System architecture
-│   ├── PROJECT_SUMMARY.md         # Project summary
-│   └── INDEX.md                   # This file
-│
-├── 🐍 Python Source Code
-│   ├── main.py                    # Entry point
-│   ├── core/                      # Backend modules
-│   │   ├── __init__.py
-│   │   ├── ai.py                  # AI engine
-│   │   ├── camera.py              # Camera handler
-│   │   ├── database.py            # Database handler
-│   │   └── hardware.py            # Hardware controller
-│   └── ui/                        # Frontend modules
-│       ├── __init__.py
-│       ├── main_window.py         # Main window
-│       └── history_window.py      # History window
-│
-├── 🔧 Arduino Firmware
-│   └── arduino/
-│       └── sorting_control.ino    # Arduino code
-│
-├── 🤖 AI Model
-│   └── model/
-│       └── best_ncnn_model/
-│           ├── model.ncnn.param   # Model structure
-│           ├── model.ncnn.bin     # Model weights
-│           ├── metadata.yaml      # Metadata
-│           └── model_ncnn.py      # Python wrapper
-│
-├── 📦 Configuration & Dependencies
-│   ├── requirements.txt           # Python packages
-│   ├── .gitignore                 # Git ignore rules
-│   └── run.sh                     # Startup script (Linux)
-│
-├── 💾 Data Directories (Auto-created)
-│   ├── captures/                  # Saved images
-│   │   ├── ok/                    # Pass images
-│   │   └── ng/                    # Reject images
-│   └── database/                  # SQLite database
-│       └── product.db             # (Auto-created)
-│
-└── 📊 Model Files (Pre-existing)
-    └── model/best_ncnn_model/     # AI model files
-```
-
----
-
-## 📋 File Categories
-
-### 1. Essential Files (Must Have)
-
-```
-✅ main.py                          # Entry point
-✅ core/*.py                        # Backend modules (4 files)
-✅ ui/*.py                          # UI modules (2 files)
-✅ arduino/sorting_control.ino     # Arduino firmware
-✅ model/best_ncnn_model/*         # AI model (4 files)
-✅ requirements.txt                 # Dependencies
-```
-
-### 2. Documentation Files (Highly Recommended)
-
-```
-📖 README.md                        # Main docs
-📖 QUICK_START.md                   # Quick guide
-📖 SETUP_GUIDE.md                   # Detailed setup
-📖 PROJECT_SUMMARY.md               # Summary
-📖 ARCHITECTURE.md                  # Architecture
-📖 WINDOWS_SETUP.md                 # Windows guide
-```
-
-### 3. Configuration Files
-
-```
-⚙️ requirements.txt                 # Python dependencies
-⚙️ .gitignore                       # Git ignore rules
-⚙️ run.sh                           # Startup script
-```
-
-### 4. Auto-Generated (Runtime)
-
-```
-🗂️ database/product.db              # SQLite database
-🖼️ captures/ok/*.jpg                # OK product images
-🖼️ captures/ng/*.jpg                # NG product images
-```
-
----
-
-## 🎯 Quick Navigation
-
-### "I want to..."
-
-| Goal | File to Read |
-|------|--------------|
-| **Understand the project** | `README.md` |
-| **Install and run quickly** | `QUICK_START.md` |
-| **Set up from scratch** | `SETUP_GUIDE.md` |
-| **Run on Windows** | `WINDOWS_SETUP.md` |
-| **Understand architecture** | `ARCHITECTURE.md` |
-| **See project scope** | `PROJECT_SUMMARY.md` |
-| **Modify AI logic** | `core/ai.py` |
-| **Change UI** | `ui/main_window.py` |
-| **Adjust Arduino behavior** | `arduino/sorting_control.ino` |
-| **Configure system** | `main.py` (config dict) |
-| **Add database features** | `core/database.py` |
-| **Debug camera issues** | `core/camera.py` |
-| **Fix serial communication** | `core/hardware.py` |
-| **Test model with camera** | `test_model_live.py` |
-| **See bounding boxes** | `test_model_live.py` |
-
----
-
-## 📊 File Statistics
-
-### Code Files
-
-| Language | Files | Lines | Purpose |
-|----------|-------|-------|---------|
-| Python | 8 | ~2,500 | Main application |
-| Arduino C++ | 1 | ~200 | Motor control |
-| Markdown | 7 | ~3,000 | Documentation |
-| **Total** | **16** | **~5,700** | **Complete system** |
-
-### Documentation Coverage
-
-- **Setup Guides**: 3 files (QUICK_START, SETUP_GUIDE, WINDOWS_SETUP)
-- **Technical Docs**: 2 files (ARCHITECTURE, PROJECT_SUMMARY)
-- **Main Docs**: 1 file (README)
-- **Navigation**: 1 file (INDEX - this file)
-- **Total**: 7 comprehensive documentation files
-
----
-
-## 🔍 Code Organization
-
-### By Functionality
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    FUNCTIONALITY MAP                    │
-└─────────────────────────────────────────────────────────┘
-
-Hardware Control:
-├── arduino/sorting_control.ino    # Relay, servo, sensor
-└── core/hardware.py               # Serial communication
-
-Computer Vision:
-├── core/camera.py                 # Image capture
-└── core/ai.py                     # Object detection
-
-Data Management:
-└── core/database.py               # SQLite operations
-
-User Interface:
-├── ui/main_window.py              # Main control panel
-└── ui/history_window.py           # History viewer
-
-Application:
-└── main.py                        # Initialization & coordination
-```
-
-### By Layer
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                      LAYER MODEL                        │
-└─────────────────────────────────────────────────────────┘
-
-Layer 4: Presentation (UI)
-├── ui/main_window.py
-└── ui/history_window.py
-
-Layer 3: Business Logic
-├── core/ai.py                     # Sorting logic
-└── main.py                        # Coordination
-
-Layer 2: Data Access
-├── core/database.py               # Persistence
-└── core/camera.py                 # Input
-
-Layer 1: Hardware Abstraction
-├── core/hardware.py               # Serial I/O
-└── arduino/sorting_control.ino    # Physical control
-```
-
----
-
-## 📚 Documentation Reading Order
-
-### For First-Time Users
-
-1. **README.md** - Get overview
-2. **QUICK_START.md** - Try running it
-3. **SETUP_GUIDE.md** - Full installation (if needed)
-4. **PROJECT_SUMMARY.md** - Understand scope
-
-### For Developers
-
-1. **ARCHITECTURE.md** - Understand design
-2. **main.py** - See initialization
-3. **core/*.py** - Study modules
-4. **ui/*.py** - Understand UI
-5. **arduino/sorting_control.ino** - Hardware control
-
-### For Evaluators/Reviewers
-
-1. **PROJECT_SUMMARY.md** - Complete overview
-2. **ARCHITECTURE.md** - Technical depth
-3. **README.md** - Feature list
-4. **Code files** - Implementation quality
-
-### For Windows Users
-
-1. **WINDOWS_SETUP.md** - Windows-specific setup
-2. **QUICK_START.md** - Running guide
-3. **README.md** - General documentation
+### Legacy Documentation (From Previous Versions)
+| File | Purpose | Status |
+|------|---------|--------|
+| `ARCHITECTURE.md` | Old architecture docs | Outdated (stop-and-go mode) |
+| `FIX_GUIDE.md` | Old troubleshooting | Partially relevant |
+| `SETUP_GUIDE.md` | Old setup guide | Outdated |
+| `WINDOWS_SETUP.md` | Windows instructions | Partially relevant |
+| `UPDATE_NOTES.md` | Change history | Reference only |
 
 ---
 
 ## 🔧 Configuration Files
 
-### Main Configuration
+| File | Purpose | Edit? |
+|------|---------|-------|
+| `config.py` | System parameters | ✅ YES - Edit for your setup |
+| `requirements.txt` | Python dependencies | ❌ NO - Use as-is |
+| `.gitignore` | Git ignore rules | ❌ NO - Use as-is |
+| `run.sh` | Startup script (Linux) | ❌ NO - Use as-is |
 
-**File**: `main.py`
+---
 
-```python
-config = {
-    'camera_id': 0,
-    'arduino_port': '/dev/ttyUSB0',
-    'model_path': 'model/best_ncnn_model',
-    'use_dummy_camera': False,
-    'use_dummy_hardware': False
-}
+## 🗂️ Data & Assets
+
+### Model Files (`model/best_ncnn_model/`)
+| File | Size | Description |
+|------|------|-------------|
+| `model.ncnn.param` | ~1KB | Model structure |
+| `model.ncnn.bin` | ~7MB | Model weights |
+| `metadata.yaml` | ~1KB | Model metadata |
+| `model_ncnn.py` | ~10KB | Python wrapper |
+
+### Database (`database/`)
+| File | Description |
+|------|-------------|
+| `product.db` | SQLite database (auto-created) |
+
+### Captures (`captures/`)
+| Directory | Contents |
+|-----------|----------|
+| `ok/` | Images of passed bottles |
+| `ng/` | Images of rejected bottles |
+| `debug/` | Debug images (if enabled) |
+
+---
+
+## 🧪 Testing & Development
+
+### Test Scripts
+| File | Purpose | When to Use |
+|------|---------|-------------|
+| `test model.py` | NCNN model testing | Test AI without hardware |
+| `test_model_live.py` | Live NCNN testing | Test with camera |
+| `test_model_yolo.py` | YOLOv8 testing | If using YOLO model |
+| `test_model_debug.py` | Debug NCNN output | Troubleshoot AI issues |
+
+### Test Guides
+| File | Purpose |
+|------|---------|
+| `TEST_MODEL_GUIDE.md` | How to test models |
+
+---
+
+## 📋 Quick Reference
+
+### What to Edit for Your Setup
+
+1. **CRITICAL - Must Edit**:
+   ```python
+   # config.py
+   TRAVEL_TIME_MS = 4500        # Measure physically!
+   ARDUINO_PORT = '/dev/ttyUSB0' # Your Arduino port
+   CAMERA_ID = 0                # Your camera ID
+   ```
+
+2. **Likely Need to Edit**:
+   ```python
+   # config.py
+   CAMERA_EXPOSURE = -4         # Adjust for lighting
+   CONFIDENCE_THRESHOLD = 0.5   # Tune for accuracy
+   ```
+
+3. **Arduino - Must Match Python**:
+   ```cpp
+   // sorting_control.ino (line 28)
+   unsigned long TRAVEL_TIME = 4500;  // Match config.py!
+   ```
+
+### Common File Locations
+
+| What | Where |
+|------|-------|
+| Main program | `main.py` |
+| Configuration | `config.py` |
+| Arduino code | `arduino/sorting_control.ino` |
+| AI model | `model/best_ncnn_model/` |
+| Captured images | `captures/ok/` and `captures/ng/` |
+| Database | `database/product.db` |
+| Logs | Terminal output (or `system.log` if enabled) |
+
+---
+
+## 🎯 Workflow Guides
+
+### First Time Setup
+```
+1. Read: QUICK_START.md
+2. Edit: config.py (TRAVEL_TIME, ports)
+3. Edit: arduino/sorting_control.ino (TRAVEL_TIME)
+4. Upload: Arduino code
+5. Run: python3 main.py
+6. Follow: CALIBRATION_GUIDE.md
 ```
 
-### Dependencies
-
-**File**: `requirements.txt`
-
+### Daily Operation
 ```
-opencv-python>=4.8.0
-Pillow>=10.0.0
-pyserial>=3.5
-numpy>=1.24.0
+1. Check: Camera, lighting, sensors
+2. Run: python3 main.py
+3. Click: "START SYSTEM"
+4. Monitor: Statistics and results
+5. Click: "STOP SYSTEM" when done
 ```
 
-### Git Ignore
-
-**File**: `.gitignore`
-
+### Troubleshooting
 ```
-__pycache__/
-*.pyc
-venv/
-*.db-journal
+1. Enable: DEBUG_MODE in config.py
+2. Check: Terminal output
+3. Check: Arduino Serial Monitor
+4. Review: CALIBRATION_GUIDE.md
+5. Check: captures/debug/ folder
 ```
+
+### Maintenance
+```
+Daily:
+- Check camera focus
+- Verify lighting
+- Test with known samples
+
+Weekly:
+- Recalibrate TRAVEL_TIME
+- Clean sensors
+- Review statistics
+
+Monthly:
+- Deep clean hardware
+- Analyze defect trends
+- Update model if needed
+```
+
+---
+
+## 🔍 Finding Specific Information
+
+### "How do I..."
+
+| Task | File to Read | Section |
+|------|--------------|---------|
+| Install the system | QUICK_START.md | Installation |
+| Calibrate travel time | CALIBRATION_GUIDE.md | Travel Time Calibration |
+| Adjust camera exposure | CALIBRATION_GUIDE.md | Camera Exposure |
+| Tune AI confidence | CALIBRATION_GUIDE.md | AI Confidence |
+| Fix overlapping boxes | config.py | NMS_THRESHOLD |
+| Change Arduino port | config.py | ARDUINO_PORT |
+| View inspection history | UI | "VIEW HISTORY" button |
+| Understand the workflow | README.md | How It Works |
+| Troubleshoot issues | CALIBRATION_GUIDE.md | Troubleshooting |
+
+### "What does this do..."
+
+| Component | File | Description |
+|-----------|------|-------------|
+| Circular buffer | arduino/sorting_control.ino | Lines 40-60 |
+| NMS algorithm | core/ai.py | `_apply_nms()` method |
+| Control First strategy | ui/main_window.py | `_process_bottle()` method |
+| Camera threading | core/camera.py | `_capture_loop()` method |
+| Serial communication | core/hardware.py | `_listen_loop()` method |
+| Sorting logic | core/ai.py | `_apply_sorting_logic()` method |
+
+---
+
+## 📊 Project Statistics
+
+### Code Metrics
+- **Total Files**: 45+
+- **Source Code**: ~2,500 lines
+  - Python: ~2,200 lines (88%)
+  - C++ (Arduino): ~150 lines (6%)
+  - Config: ~150 lines (6%)
+- **Documentation**: ~1,500 lines
+- **Languages**: Python, C++, Markdown
+
+### File Breakdown
+| Category | Files | Lines |
+|----------|-------|-------|
+| Core Logic | 5 | ~1,400 |
+| UI | 2 | ~700 |
+| Arduino | 1 | ~150 |
+| Config | 1 | ~80 |
+| Main | 1 | ~215 |
+| Documentation | 8+ | ~1,500 |
+| Tests | 4 | ~500 |
 
 ---
 
 ## 🎓 Learning Path
 
-### Beginner Level
+### For Students/Beginners
 
-1. Read `README.md`
-2. Run with dummy modes (no hardware)
-3. Explore UI features
-4. View code comments
+**Week 1**: Understanding
+1. Read README.md
+2. Read PROJECT_SUMMARY.md
+3. Study workflow diagram
+4. Review Arduino code
 
-### Intermediate Level
+**Week 2**: Setup
+1. Follow QUICK_START.md
+2. Install dependencies
+3. Upload Arduino code
+4. Test with dummy mode
 
-1. Study `ARCHITECTURE.md`
-2. Understand threading model
-3. Modify AI threshold
-4. Customize UI
+**Week 3**: Calibration
+1. Follow CALIBRATION_GUIDE.md
+2. Measure travel time
+3. Adjust camera exposure
+4. Tune AI confidence
 
-### Advanced Level
+**Week 4**: Operation
+1. Run with real hardware
+2. Test with known samples
+3. Monitor statistics
+4. Optimize performance
 
-1. Implement new AI models
-2. Add new sensors
-3. Optimize performance
-4. Extend database schema
+### For Developers
+
+**Phase 1**: Code Review
+- Study `core/ai.py` (AI logic)
+- Study `arduino/sorting_control.ino` (circular buffer)
+- Study `ui/main_window.py` (Control First strategy)
+
+**Phase 2**: Customization
+- Modify sorting logic
+- Add new features
+- Optimize performance
+- Extend UI
+
+**Phase 3**: Advanced
+- Integrate new sensors
+- Add network features
+- Implement analytics
+- Deploy to production
 
 ---
 
-## 🐛 Debugging Guide
+## 🆘 Quick Help
 
-### Issue: System won't start
+### System Won't Start
+→ Check `QUICK_START.md` → Troubleshooting section
 
-**Check**:
-1. `requirements.txt` - Dependencies installed?
-2. `main.py` - Configuration correct?
-3. Terminal output - Error messages?
+### Wrong Bottles Rejected
+→ Check `CALIBRATION_GUIDE.md` → Travel Time section
 
-### Issue: Camera not working
+### Poor Detection Accuracy
+→ Check `CALIBRATION_GUIDE.md` → AI Confidence section
 
-**Check**:
-1. `core/camera.py` - Camera initialization
-2. `main.py` - Camera ID correct?
-3. Try dummy mode: `'use_dummy_camera': True`
+### Motion Blur in Images
+→ Check `CALIBRATION_GUIDE.md` → Camera Exposure section
 
-### Issue: Arduino not responding
-
-**Check**:
-1. `arduino/sorting_control.ino` - Code uploaded?
-2. `core/hardware.py` - Port correct?
-3. Device Manager (Windows) or `ls /dev/tty*` (Linux)
-
-### Issue: AI not detecting
-
-**Check**:
-1. `core/ai.py` - Model loaded?
-2. `model/best_ncnn_model/` - Files present?
-3. NCNN installed? (Falls back to dummy mode)
+### Need Technical Details
+→ Check `PROJECT_SUMMARY.md` → Technical Highlights
 
 ---
 
 ## 📞 Support Resources
 
-### Documentation
-
-- **README.md**: General help
-- **SETUP_GUIDE.md**: Installation issues
-- **WINDOWS_SETUP.md**: Windows problems
-- **ARCHITECTURE.md**: Understanding design
-
-### Code Comments
-
-All Python files have extensive inline comments:
-- Function docstrings
-- Logic explanations
-- Parameter descriptions
-
-### Arduino Serial Monitor
-
-- Open in Arduino IDE
-- Set to 9600 baud
-- Watch for debug messages
+1. **Documentation**: Read guides in order (README → QUICK_START → CALIBRATION)
+2. **Debug Mode**: Enable in `config.py` for detailed logs
+3. **Arduino Monitor**: Open Serial Monitor (9600 baud) for hardware status
+4. **Test Scripts**: Use test files to isolate issues
+5. **Debug Images**: Check `captures/debug/` folder
 
 ---
 
-## ✅ Project Checklist
+## 🗺️ Project Roadmap
 
-### Before Running
+### Current Version: 2.0.0 (Continuous Mode)
+✅ Circular buffer queue  
+✅ Control First strategy  
+✅ NCNN with NMS  
+✅ Manual exposure control  
+✅ Complete documentation  
 
-- [ ] All files present (see Essential Files above)
-- [ ] Python dependencies installed
-- [ ] Arduino code uploaded
-- [ ] Hardware connected and wired
-- [ ] Configuration updated in `main.py`
-
-### For Development
-
-- [ ] Virtual environment created
-- [ ] Git repository initialized
-- [ ] Dummy modes tested
-- [ ] Code documented
-- [ ] Changes committed
-
-### For Deployment
-
-- [ ] Raspberry Pi OS updated
-- [ ] All dependencies installed
-- [ ] Hardware calibrated
-- [ ] System tested end-to-end
-- [ ] Documentation reviewed
+### Future Enhancements
+- [ ] Multi-camera support
+- [ ] Web dashboard
+- [ ] Cloud integration
+- [ ] Advanced analytics
+- [ ] Automatic calibration
 
 ---
 
-## 📈 Version Information
-
-| Aspect | Details |
-|--------|---------|
-| **Version** | 1.0.0 |
-| **Date** | December 2025 |
-| **Status** | Production Ready ✅ |
-| **Python** | 3.7+ |
-| **Platform** | Raspberry Pi 5 (primary), Windows (dev) |
-| **License** | Educational Use |
-
----
-
-## 🎯 Key Files Summary
-
-### Top 5 Most Important Files
-
-1. **main.py** - Application entry point
-2. **core/ai.py** - AI inference and sorting logic
-3. **arduino/sorting_control.ino** - Hardware control
-4. **ui/main_window.py** - User interface
-5. **README.md** - Documentation
-
-### Top 3 Documentation Files
-
-1. **README.md** - Complete project guide
-2. **SETUP_GUIDE.md** - Installation instructions
-3. **ARCHITECTURE.md** - System design
-
----
-
-## 🔗 File Dependencies
-
-```
-main.py
-├── imports core.ai
-├── imports core.camera
-├── imports core.hardware
-├── imports core.database
-└── imports ui.main_window
-    └── imports ui.history_window
-
-core/ai.py
-├── requires model/best_ncnn_model/*
-└── uses opencv, ncnn
-
-core/camera.py
-└── uses opencv, threading
-
-core/database.py
-└── uses sqlite3
-
-core/hardware.py
-└── uses pyserial
-
-ui/main_window.py
-├── uses tkinter, PIL
-└── requires all core modules
-
-arduino/sorting_control.ino
-└── uses Servo library
-```
-
----
-
-## 📝 Notes
-
-### File Naming Conventions
-
-- **UPPERCASE.md**: Documentation files
-- **lowercase.py**: Python source files
-- **lowercase.ino**: Arduino source files
-- **lowercase/**: Directories
-
-### Code Style
-
-- **Python**: PEP 8 compliant
-- **Arduino**: Arduino style guide
-- **Documentation**: Markdown with emojis
-
-### Comments
-
-- All functions have docstrings
-- Complex logic is explained
-- TODO items marked clearly
-
----
-
-## 🎉 Conclusion
-
-This project contains **16 source files** and **7 documentation files**, totaling approximately **5,700 lines** of code and documentation.
-
-Everything you need is organized and documented. Use this index to navigate the project efficiently!
-
----
+**Last Updated**: December 2025  
+**Project Status**: ✅ Complete and Production-Ready
 
 **Quick Links**:
-- 🚀 [Quick Start](QUICK_START.md)
-- 📖 [Main Documentation](README.md)
-- 🔧 [Setup Guide](SETUP_GUIDE.md)
-- 🏗️ [Architecture](ARCHITECTURE.md)
-- 📋 [Project Summary](PROJECT_SUMMARY.md)
-
-**Happy Coding! 🥤🤖**
-
+- [Main Documentation](README.md)
+- [Quick Start](QUICK_START.md)
+- [Calibration Guide](CALIBRATION_GUIDE.md)
+- [Project Summary](PROJECT_SUMMARY.md)
