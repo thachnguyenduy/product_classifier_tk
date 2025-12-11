@@ -62,7 +62,9 @@ CAMERA_EXPOSURE = -6
 # ============================================
 # ARDUINO COMMUNICATION
 # ============================================
-ARDUINO_PORT = 'COM3'  # Windows: COM3, Linux: /dev/ttyUSB0, Mac: /dev/cu.usbserial
+ARDUINO_PORT = '/dev/ttyUSB0'  # Arduino Uno CH340 (chip dán) - Change if needed
+# Common alternatives: /dev/ttyACM0, /dev/ttyUSB1
+# Check with: ls /dev/ttyUSB* or ls /dev/ttyACM*
 ARDUINO_BAUDRATE = 9600
 ARDUINO_TIMEOUT = 1
 
