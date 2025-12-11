@@ -1,0 +1,25 @@
+description: Ultralytics best model trained on /content/data.yaml
+author: Ultralytics
+date: '2025-12-10T17:03:55.620872'
+version: 8.3.232
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 32
+task: detect
+batch: 1
+imgsz:
+- 640
+- 640
+names:
+  0: Cap-Defect
+  1: Filling-Defect
+  2: Label-Defect
+  3: Wrong-Product
+  4: cap
+  5: coca
+  6: filled
+  7: label
+args:
+  batch: 1
+  half: false
+channels: 3

@@ -1,0 +1,17 @@
+# ============================================
+# REQUIREMENTS - Python Dependencies
+# ============================================
+
+# Core
+opencv-python>=4.8.0
+numpy>=1.24.0
+Pillow>=10.0.0
+pyserial>=3.5
+
+# NCNN (install separately if not available via pip)
+# On Raspberry Pi: sudo apt-get install python3-ncnn
+# Or build from source: https://github.com/Tencent/ncnn
+
+# For Windows testing without NCNN:
+# Just run - dummy fallback will activate automatically
+
