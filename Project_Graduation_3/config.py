@@ -44,8 +44,8 @@ REQUIRED_COMPONENTS = {
 # VIRTUAL LINE DETECTION
 # ============================================
 VIRTUAL_LINE_X = 320  # Pixel position (center of 640px frame)
-CROSSING_TOLERANCE = 20  # Pixels tolerance for crossing detection
-DETECTION_COOLDOWN = 1.0  # Seconds between detections
+CROSSING_TOLERANCE = 40  # Pixels tolerance for crossing detection (increased for better detection)
+DETECTION_COOLDOWN = 0.8  # Seconds between detections (reduced for faster processing)
 
 # ============================================
 # CAMERA SETTINGS

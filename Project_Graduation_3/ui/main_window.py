@@ -32,7 +32,8 @@ class MainWindow:
         self.system_running = False
         self.product_queue = []  # FIFO Queue: [(result, reason, timestamp, image), ...]
         self.last_detection_time = 0  # For cooldown
-        self.last_bottle_x = None  # Track bottle position
+        self.tracked_bottles = {}  # Track bottles: {id: {'cx': x, 'cy': y, 'last_seen': time}}
+        self.next_bottle_id = 0
         
         # Statistics
         self.total_count = 0
@@ -206,12 +207,13 @@ class MainWindow:
     
     def _check_crossing(self, frame):
         """
-        Check if bottle crosses virtual line
+        Check if bottle crosses virtual line from RIGHT to LEFT
         
-        Improved logic:
-        - Better blob detection with size and shape validation
-        - Draw bounding box on detected bottle
-        - Only trigger when valid bottle crosses line
+        Logic:
+        - Bottle starts at RIGHT (cx > line_x)
+        - Moves LEFT (cx decreases)
+        - Crosses line (cx passes line_x)
+        - Only trigger once when crossing from right to left
         """
         current_time = time.time()
         
@@ -222,17 +224,22 @@ class MainWindow:
         # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # Apply Gaussian blur to reduce noise
+        # Apply Gaussian blur
         blurred = cv2.GaussianBlur(gray, (5, 5), 0)
         
-        # Use adaptive threshold for better detection
-        thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
-                                       cv2.THRESH_BINARY_INV, 11, 2)
+        # Try multiple threshold methods
+        thresh1 = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                        cv2.THRESH_BINARY_INV, 11, 2)
+        _, thresh2 = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         
-        # Find contours
-        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours1, _ = cv2.findContours(thresh1, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours2, _ = cv2.findContours(thresh2, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        contours = contours1 if len(contours1) > len(contours2) else contours2
         
         if len(contours) == 0:
+            if config.DEBUG_MODE:
+                print("[Blob] No contours found")
             return
         
         # Find valid bottle contours
@@ -240,21 +247,17 @@ class MainWindow:
         for contour in contours:
             area = cv2.contourArea(contour)
             
-            # Filter by minimum area (increased for better accuracy)
-            if area < 8000:  # Increased from 5000
+            # Reduced threshold for better detection
+            if area < 5000:
                 continue
             
-            # Get bounding rectangle
             x, y, w, h = cv2.boundingRect(contour)
-            
-            # Check aspect ratio (bottle should be taller than wide)
             aspect_ratio = float(h) / float(w) if w > 0 else 0
             
-            # Valid bottle: aspect ratio between 1.5 and 4.0
-            if aspect_ratio < 1.2 or aspect_ratio > 5.0:
+            # More lenient aspect ratio
+            if aspect_ratio < 1.0 or aspect_ratio > 6.0:
                 continue
             
-            # Calculate center
             M = cv2.moments(contour)
             if M["m00"] == 0:
                 continue
@@ -271,9 +274,18 @@ class MainWindow:
             })
         
         if len(valid_bottles) == 0:
+            if config.DEBUG_MODE:
+                print("[Blob] No valid bottles found")
             return
         
-        # Find bottle closest to virtual line
+        # Clean old tracked bottles (not seen for 2 seconds)
+        current_time = time.time()
+        self.tracked_bottles = {
+            bid: data for bid, data in self.tracked_bottles.items()
+            if current_time - data['last_seen'] < 2.0
+        }
+        
+        # Match bottles to tracked ones or create new
         line_x = config.VIRTUAL_LINE_X
         tolerance = config.CROSSING_TOLERANCE
         
@@ -281,28 +293,85 @@ class MainWindow:
             cx, cy = bottle['center']
             x, y, w, h = bottle['bbox']
             
-            # Draw bounding box (GREEN = detected bottle)
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            # Find closest tracked bottle
+            matched_id = None
+            min_dist = float('inf')
             
-            # Draw center point
-            cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)
+            for bid, tracked in self.tracked_bottles.items():
+                dist = abs(cx - tracked['cx']) + abs(cy - tracked['cy'])
+                if dist < min_dist and dist < 100:  # Max 100 pixels movement
+                    min_dist = dist
+                    matched_id = bid
             
-            # Show info
-            info_text = f"Area: {bottle['area']:.0f}, AR: {bottle['aspect_ratio']:.2f}"
-            cv2.putText(frame, info_text, (x, y - 10), 
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+            # Create new tracking if no match
+            if matched_id is None:
+                matched_id = self.next_bottle_id
+                self.next_bottle_id += 1
+                self.tracked_bottles[matched_id] = {
+                    'cx': cx,
+                    'cy': cy,
+                    'last_seen': current_time,
+                    'crossed': False
+                }
             
-            # Check if crossing line
-            if abs(cx - line_x) < tolerance:
-                # Draw RED box when crossing (trigger detection)
-                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 3)
-                cv2.putText(frame, "CROSSING!", (x, y - 30), 
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            # Update tracking
+            tracked = self.tracked_bottles[matched_id]
+            prev_cx = tracked['cx']
+            tracked['cx'] = cx
+            tracked['cy'] = cy
+            tracked['last_seen'] = current_time
+            
+            # Draw bounding box
+            color = (0, 255, 0) if not tracked.get('crossed', False) else (128, 128, 128)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), color, 2)
+            cv2.circle(frame, (cx, cy), 5, color, -1)
+            
+            # Show direction arrow and position info
+            if prev_cx != cx:
+                direction = "←" if cx < prev_cx else "→"
+                cv2.putText(frame, direction, (cx + 10, cy), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
+            
+            # Show position relative to line
+            if config.DEBUG_MODE:
+                pos_text = f"x={cx}"
+                if cx > line_x:
+                    pos_text += " (RIGHT)"
+                elif cx < line_x:
+                    pos_text += " (LEFT)"
+                else:
+                    pos_text += " (LINE)"
                 
-                # Bottle is crossing! Trigger detection
-                self._on_bottle_detected(frame, cx, cy)
-                self.last_detection_time = current_time
-                return  # Only process one bottle at a time
+                cv2.putText(frame, pos_text, (x, y + h + 15), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.3, color, 1)
+            
+            # Check crossing from RIGHT to LEFT
+            # Previous position was RIGHT of line, current is at or LEFT of line
+            if not tracked.get('crossed', False):
+                # Check if bottle moved from right side to left side of line
+                was_right = prev_cx > line_x
+                is_at_or_left = cx <= line_x + tolerance
+                moved_left = cx < prev_cx  # Moving left direction
+                
+                if was_right and is_at_or_left and moved_left:
+                    # Bottle crossed from right to left!
+                    tracked['crossed'] = True
+                    
+                    # Draw RED box
+                    cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 3)
+                    cv2.putText(frame, "CROSSING!", (x, y - 30), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    
+                    if config.DEBUG_MODE:
+                        print(f"[Blob] ✅ Bottle #{matched_id} CROSSED LINE!")
+                        print(f"  From: {prev_cx} (RIGHT) → To: {cx} (LEFT)")
+                        print(f"  Line: {line_x}, Tolerance: {tolerance}")
+                        print(f"  Conditions: was_right={was_right}, is_at_or_left={is_at_or_left}, moved_left={moved_left}")
+                    
+                    # Trigger detection
+                    self._on_bottle_detected(frame, cx, cy)
+                    self.last_detection_time = current_time
+                    return
     
     def _on_bottle_detected(self, frame, cx, cy):
         """
