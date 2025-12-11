@@ -132,24 +132,30 @@ class MainWindow:
         # Start hardware listening with callback
         self.hardware.start_listening(self.on_trigger_received)
         
+        # Start conveyor belt
+        self.hardware.start_conveyor()
+        
         self.system_running = True
         self.start_btn.config(state=tk.DISABLED)
         self.stop_btn.config(state=tk.NORMAL)
-        self.status_label.config(text="✅ System Running")
+        self.status_label.config(text="✅ System Running (Conveyor ON)")
         
-        print("[UI] System STARTED")
+        print("[UI] System STARTED - Conveyor running")
     
     def stop_system(self):
         """Stop the sorting system"""
         if not self.system_running:
             return
         
+        # Stop conveyor belt
+        self.hardware.stop_conveyor()
+        
         self.system_running = False
         self.start_btn.config(state=tk.NORMAL)
         self.stop_btn.config(state=tk.DISABLED)
-        self.status_label.config(text="⏹ System Stopped")
+        self.status_label.config(text="⏹ System Stopped (Conveyor OFF)")
         
-        print("[UI] System STOPPED")
+        print("[UI] System STOPPED - Conveyor stopped")
     
     def _update_video_loop(self):
         """Continuous video update loop"""
@@ -191,10 +197,10 @@ class MainWindow:
         """
         Check if bottle crosses virtual line
         
-        Logic:
-        - Use simple blob detection to find bottle
-        - Check if center_x is near VIRTUAL_LINE_X
-        - Apply cooldown to avoid multiple detections
+        Improved logic:
+        - Better blob detection with size and shape validation
+        - Draw bounding box on detected bottle
+        - Only trigger when valid bottle crosses line
         """
         current_time = time.time()
         
@@ -202,9 +208,15 @@ class MainWindow:
         if current_time - self.last_detection_time < config.DETECTION_COOLDOWN:
             return
         
-        # Simple blob detection (grayscale + threshold)
+        # Convert to grayscale
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY)
+        
+        # Apply Gaussian blur to reduce noise
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        
+        # Use adaptive threshold for better detection
+        thresh = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, 
+                                       cv2.THRESH_BINARY_INV, 11, 2)
         
         # Find contours
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -212,30 +224,74 @@ class MainWindow:
         if len(contours) == 0:
             return
         
-        # Find largest contour (assumed to be bottle)
-        largest_contour = max(contours, key=cv2.contourArea)
-        area = cv2.contourArea(largest_contour)
+        # Find valid bottle contours
+        valid_bottles = []
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            
+            # Filter by minimum area (increased for better accuracy)
+            if area < 8000:  # Increased from 5000
+                continue
+            
+            # Get bounding rectangle
+            x, y, w, h = cv2.boundingRect(contour)
+            
+            # Check aspect ratio (bottle should be taller than wide)
+            aspect_ratio = float(h) / float(w) if w > 0 else 0
+            
+            # Valid bottle: aspect ratio between 1.5 and 4.0
+            if aspect_ratio < 1.2 or aspect_ratio > 5.0:
+                continue
+            
+            # Calculate center
+            M = cv2.moments(contour)
+            if M["m00"] == 0:
+                continue
+            
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+            
+            valid_bottles.append({
+                'contour': contour,
+                'bbox': (x, y, w, h),
+                'center': (cx, cy),
+                'area': area,
+                'aspect_ratio': aspect_ratio
+            })
         
-        # Filter small noise
-        if area < 5000:
+        if len(valid_bottles) == 0:
             return
         
-        # Get center
-        M = cv2.moments(largest_contour)
-        if M["m00"] == 0:
-            return
-        
-        cx = int(M["m10"] / M["m00"])
-        cy = int(M["m01"] / M["m00"])
-        
-        # Check if crossing line
+        # Find bottle closest to virtual line
         line_x = config.VIRTUAL_LINE_X
         tolerance = config.CROSSING_TOLERANCE
         
-        if abs(cx - line_x) < tolerance:
-            # Bottle is crossing!
-            self._on_bottle_detected(frame, cx, cy)
-            self.last_detection_time = current_time
+        for bottle in valid_bottles:
+            cx, cy = bottle['center']
+            x, y, w, h = bottle['bbox']
+            
+            # Draw bounding box (GREEN = detected bottle)
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            
+            # Draw center point
+            cv2.circle(frame, (cx, cy), 5, (0, 255, 0), -1)
+            
+            # Show info
+            info_text = f"Area: {bottle['area']:.0f}, AR: {bottle['aspect_ratio']:.2f}"
+            cv2.putText(frame, info_text, (x, y - 10), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 255, 0), 1)
+            
+            # Check if crossing line
+            if abs(cx - line_x) < tolerance:
+                # Draw RED box when crossing (trigger detection)
+                cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 0, 255), 3)
+                cv2.putText(frame, "CROSSING!", (x, y - 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                
+                # Bottle is crossing! Trigger detection
+                self._on_bottle_detected(frame, cx, cy)
+                self.last_detection_time = current_time
+                return  # Only process one bottle at a time
     
     def _on_bottle_detected(self, frame, cx, cy):
         """

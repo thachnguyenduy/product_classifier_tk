@@ -103,6 +103,14 @@ class HardwareController:
         """Send OK command to Arduino (optional)"""
         return self._send_command(config.CMD_OK)
     
+    def start_conveyor(self):
+        """Send start conveyor command to Arduino"""
+        return self._send_command('S')
+    
+    def stop_conveyor(self):
+        """Send stop/pause conveyor command to Arduino"""
+        return self._send_command('P')
+    
     def _send_command(self, cmd):
         """Send single character command"""
         if not self.connected:
@@ -172,6 +180,14 @@ class DummyHardwareController:
     
     def send_ok(self):
         print("[Hardware] DUMMY ok sent")
+        return True
+    
+    def start_conveyor(self):
+        print("[Hardware] DUMMY conveyor started")
+        return True
+    
+    def stop_conveyor(self):
+        print("[Hardware] DUMMY conveyor stopped")
         return True
     
     def stop(self):
