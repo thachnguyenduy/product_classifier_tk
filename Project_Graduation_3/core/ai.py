@@ -230,14 +230,16 @@ class AIEngine:
     
     def _parse_ncnn_output(self, output, img_w, img_h):
         """
-        Parse NCNN output tensor
+        Parse NCNN output tensor - IMPROVED VERSION
         
         YOLOv8 NCNN output format:
-        - Shape: (1, 84, 8400) or (84, 8400)
+        - Shape: (1, 84, 8400) or (84, 8400) or (8400, 84)
         - 84 = 4 (bbox) + 80 (classes, but we only use 8)
         - 8400 = number of anchor boxes
         
         Format: [x_center, y_center, width, height, class1_score, class2_score, ...]
+        
+        CRITICAL: Coordinates are in INPUT_SIZE scale (0-640), NOT normalized (0-1)
         """
         detections = []
         
@@ -246,26 +248,61 @@ class AIEngine:
             out_np = np.array(output)
             
             if config.DEBUG_MODE:
-                print(f"[AI] NCNN output shape: {out_np.shape}")
+                print(f"[AI] NCNN raw output shape: {out_np.shape}")
+                print(f"[AI] NCNN raw output dtype: {out_np.dtype}")
             
-            # Remove batch dimension if present
+            # Remove batch dimension if present (1, 84, 8400) -> (84, 8400)
             if len(out_np.shape) == 3:
-                out_np = out_np[0]
-            
-            # Transpose if needed: (84, 8400) -> (8400, 84)
-            if out_np.shape[0] < out_np.shape[1]:
-                out_np = out_np.T
                 if config.DEBUG_MODE:
-                    print(f"[AI] Transposed to: {out_np.shape}")
+                    print(f"[AI] Removing batch dimension...")
+                out_np = out_np[0]
+                if config.DEBUG_MODE:
+                    print(f"[AI] After removing batch: {out_np.shape}")
             
-            num_detections = out_np.shape[0]
+            # YOLOv8 NCNN typically outputs (84, 8400)
+            # We need (8400, 84) for easier processing
+            if len(out_np.shape) == 2:
+                # Check if we need to transpose
+                if out_np.shape[0] < out_np.shape[1]:
+                    # Shape is (84, 8400) -> transpose to (8400, 84)
+                    if config.DEBUG_MODE:
+                        print(f"[AI] Transposing from {out_np.shape}...")
+                    out_np = out_np.T
+                    if config.DEBUG_MODE:
+                        print(f"[AI] After transpose: {out_np.shape}")
+            
+            # Validate shape
+            if len(out_np.shape) != 2:
+                print(f"[ERROR] Unexpected output shape: {out_np.shape}")
+                return []
+            
+            num_detections, num_features = out_np.shape
             num_classes = len(self.class_names)
             
-            # Scale factors (input_size -> original size)
+            if config.DEBUG_MODE:
+                print(f"[AI] Processing {num_detections} detections")
+                print(f"[AI] Features per detection: {num_features}")
+                print(f"[AI] Expected: 4 (bbox) + {num_classes} (classes) = {4 + num_classes}")
+            
+            # Scale factors
             scale_x = img_w / self.input_size
             scale_y = img_h / self.input_size
             
+            if config.DEBUG_MODE:
+                print(f"[AI] Scale factors: x={scale_x:.3f}, y={scale_y:.3f}")
+                print(f"[AI] Original image: {img_w}x{img_h}")
+                print(f"[AI] Input size: {self.input_size}x{self.input_size}")
+            
+            # Sample first detection for debugging
+            if config.DEBUG_MODE and num_detections > 0:
+                sample = out_np[0]
+                print(f"[AI] Sample detection[0]:")
+                print(f"  - bbox (xywh): [{sample[0]:.2f}, {sample[1]:.2f}, {sample[2]:.2f}, {sample[3]:.2f}]")
+                print(f"  - class scores (first 8): {sample[4:4+num_classes]}")
+                print(f"  - max score: {np.max(sample[4:4+num_classes]):.3f}")
+            
             # Process each detection
+            valid_count = 0
             for i in range(num_detections):
                 detection = out_np[i]
                 
@@ -273,11 +310,18 @@ class AIEngine:
                 if len(detection) < 4 + num_classes:
                     continue
                 
-                # Extract bbox (center format, in input_size scale)
+                # Extract bbox (center format, in input_size scale 0-640)
                 x_center = detection[0] * scale_x
                 y_center = detection[1] * scale_y
                 width = detection[2] * scale_x
                 height = detection[3] * scale_y
+                
+                # Validate bbox values
+                if width <= 0 or height <= 0:
+                    continue
+                
+                if x_center < 0 or y_center < 0:
+                    continue
                 
                 # Extract class scores (only first 8 classes)
                 class_scores = detection[4:4+num_classes]
@@ -295,25 +339,39 @@ class AIEngine:
                     y2 = int(y_center + height / 2)
                     
                     # Clamp to image bounds
-                    x1 = max(0, min(x1, img_w))
-                    y1 = max(0, min(y1, img_h))
-                    x2 = max(0, min(x2, img_w))
-                    y2 = max(0, min(y2, img_h))
+                    x1 = max(0, min(x1, img_w - 1))
+                    y1 = max(0, min(y1, img_h - 1))
+                    x2 = max(1, min(x2, img_w))
+                    y2 = max(1, min(y2, img_h))
                     
-                    # Validate box
+                    # Validate box dimensions
                     if x2 > x1 and y2 > y1:
-                        detections.append({
-                            'class_id': class_id,
-                            'class_name': self.class_names[class_id],
-                            'confidence': confidence,
-                            'bbox': [x1, y1, x2, y2]
-                        })
+                        box_w = x2 - x1
+                        box_h = y2 - y1
+                        
+                        # Filter tiny boxes (likely noise)
+                        if box_w >= 5 and box_h >= 5:
+                            detections.append({
+                                'class_id': class_id,
+                                'class_name': self.class_names[class_id],
+                                'confidence': confidence,
+                                'bbox': [x1, y1, x2, y2]
+                            })
+                            
+                            valid_count += 1
+                            
+                            # Debug first few detections
+                            if config.DEBUG_MODE and valid_count <= 3:
+                                print(f"[AI] Detection #{valid_count}: {self.class_names[class_id]} "
+                                      f"({confidence:.2f}) at [{x1}, {y1}, {x2}, {y2}]")
+            
+            if config.DEBUG_MODE:
+                print(f"[AI] Total valid detections (before NMS): {len(detections)}")
         
         except Exception as e:
             print(f"[ERROR] Parse NCNN output failed: {e}")
-            if config.DEBUG_MODE:
-                import traceback
-                traceback.print_exc()
+            import traceback
+            traceback.print_exc()
         
         return detections
     

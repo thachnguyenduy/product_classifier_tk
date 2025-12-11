@@ -101,15 +101,19 @@ SAVE_SNAPSHOTS = True
 # ============================================
 # DEBUG SETTINGS
 # ============================================
-DEBUG_MODE = True
-SAVE_DEBUG_IMAGES = True
+DEBUG_MODE = True  # Show detailed debug info
+SAVE_DEBUG_IMAGES = True  # Save annotated images
 
 # Print verbose logs
-VERBOSE_LOGGING = True
+VERBOSE_LOGGING = True  # Print processing logs
 
 # ============================================
 # TESTING MODE (Dummy Hardware)
 # ============================================
-USE_DUMMY_CAMERA = False
-USE_DUMMY_HARDWARE = False
+USE_DUMMY_CAMERA = False   # Set True to test UI without camera
+USE_DUMMY_HARDWARE = False # Set True to test without Arduino
+
+# ============================================
+# NOTE: For production, set both to False!
+# ============================================
 
