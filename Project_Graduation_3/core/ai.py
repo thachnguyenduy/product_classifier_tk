@@ -48,6 +48,10 @@ class AIEngine:
             param_path = os.path.join(config.MODEL_PATH, config.MODEL_PARAM)
             bin_path = os.path.join(config.MODEL_PATH, config.MODEL_BIN)
             
+            print(f"[AI] Loading model from: {config.MODEL_PATH}")
+            print(f"[AI] Param: {config.MODEL_PARAM}")
+            print(f"[AI] Bin: {config.MODEL_BIN}")
+            
             if not os.path.exists(param_path):
                 print(f"[ERROR] Model param file not found: {param_path}")
                 return
@@ -56,24 +60,40 @@ class AIEngine:
                 print(f"[ERROR] Model bin file not found: {bin_path}")
                 return
             
+            print(f"[AI] Files found:")
+            print(f"  - {param_path} ({os.path.getsize(param_path) / 1024:.1f} KB)")
+            print(f"  - {bin_path} ({os.path.getsize(bin_path) / 1024 / 1024:.1f} MB)")
+            
             # Initialize NCNN network
             self.net = ncnn.Net()
             
-            # Configure
-            self.net.opt.use_vulkan_compute = True  # GPU acceleration if available
+            # Configure (disable Vulkan for stability)
+            self.net.opt.use_vulkan_compute = False  # Use CPU for stability
+            self.net.opt.num_threads = 4  # Use 4 threads
+            
+            print(f"[AI] NCNN configured (CPU mode, 4 threads)")
             
             # Load model
+            print(f"[AI] Loading param file...")
             ret_param = self.net.load_param(param_path)
+            
+            if ret_param != 0:
+                print(f"[ERROR] Failed to load param file (code={ret_param})")
+                return
+            
+            print(f"[AI] Loading bin file...")
             ret_bin = self.net.load_model(bin_path)
             
-            if ret_param == 0 and ret_bin == 0:
-                self.model_loaded = True
-                print(f"[AI] NCNN model loaded successfully")
-                print(f"[AI] Input size: {self.input_size}x{self.input_size}")
-                print(f"[AI] Confidence threshold: {self.conf_threshold}")
-                print(f"[AI] NMS threshold: {self.nms_threshold}")
-            else:
-                print(f"[ERROR] Failed to load NCNN model (param={ret_param}, bin={ret_bin})")
+            if ret_bin != 0:
+                print(f"[ERROR] Failed to load bin file (code={ret_bin})")
+                return
+            
+            self.model_loaded = True
+            print(f"[AI] ✅ NCNN model loaded successfully!")
+            print(f"[AI] Input size: {self.input_size}x{self.input_size}")
+            print(f"[AI] Confidence threshold: {self.conf_threshold}")
+            print(f"[AI] NMS threshold: {self.nms_threshold}")
+            print(f"[AI] Input blob: 'in0', Output blob: 'out0'")
                 
         except Exception as e:
             print(f"[ERROR] Exception loading NCNN model: {e}")
@@ -165,18 +185,37 @@ class AIEngine:
             List of raw detections (before NMS)
         """
         try:
+            if config.DEBUG_MODE:
+                print(f"[AI] Creating extractor...")
+            
             # Create extractor
             ex = self.net.create_extractor()
             
-            # Input blob name (try common names)
-            ex.input("in0", mat_in)
+            # Disable Vulkan if causing issues (use CPU)
+            ex.set_vulkan_compute(False)  # Force CPU for stability
             
-            # Extract output (try common names)
+            if config.DEBUG_MODE:
+                print(f"[AI] Setting input 'in0'...")
+            
+            # Input blob name
+            ret_input = ex.input("in0", mat_in)
+            
+            if ret_input != 0:
+                print(f"[ERROR] NCNN input failed with code {ret_input}")
+                return []
+            
+            if config.DEBUG_MODE:
+                print(f"[AI] Extracting output 'out0'...")
+            
+            # Extract output
             ret, mat_out = ex.extract("out0")
             
             if ret != 0:
                 print(f"[ERROR] NCNN extract failed with code {ret}")
                 return []
+            
+            if config.DEBUG_MODE:
+                print(f"[AI] Output extracted successfully, parsing...")
             
             # Parse output
             detections = self._parse_ncnn_output(mat_out, orig_w, orig_h)
@@ -185,9 +224,8 @@ class AIEngine:
             
         except Exception as e:
             print(f"[ERROR] NCNN inference failed: {e}")
-            if config.DEBUG_MODE:
-                import traceback
-                traceback.print_exc()
+            import traceback
+            traceback.print_exc()
             return []
     
     def _parse_ncnn_output(self, output, img_w, img_h):

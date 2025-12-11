@@ -1,322 +1,332 @@
 #!/usr/bin/env python3
-# ============================================
-# TEST AI MODEL - Standalone Testing Tool
-# ============================================
+"""
+Debug version - Test nhiều cách parse YOLO output khác nhau
+"""
 
 import cv2
-import sys
+import numpy as np
+import time
 import os
+import ncnn
 
-# Add project root to path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+MODEL_PATH = "model/best_ncnn_model"
+MODEL_PARAM = os.path.join(MODEL_PATH, "model.ncnn.param")
+MODEL_BIN = os.path.join(MODEL_PATH, "model.ncnn.bin")
 
-import config
-from core.ai import AIEngine
+INPUT_SIZE = 640
+CONFIDENCE_THRESHOLD = 0.3  # Giảm xuống để dễ thấy detections
 
-def test_with_camera():
-    """
-    Test AI model with live camera
-    Press 'q' to quit, 's' to save snapshot
-    """
-    print("=" * 60)
-    print("  AI MODEL TESTING - LIVE CAMERA")
-    print("=" * 60)
-    print("\nControls:")
-    print("  - Press 'q' to quit")
-    print("  - Press 's' to save snapshot")
-    print("  - Press 'SPACE' to run detection on current frame")
-    print("\n" + "=" * 60 + "\n")
-    
-    # Initialize AI
-    ai = AIEngine()
-    
-    if not ai.model_loaded:
-        print("[ERROR] AI model failed to load!")
-        return
-    
-    # Initialize camera
-    cap = cv2.VideoCapture(config.CAMERA_ID)
-    
-    if not cap.isOpened():
-        print(f"[ERROR] Cannot open camera {config.CAMERA_ID}")
-        return
-    
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, config.CAMERA_WIDTH)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, config.CAMERA_HEIGHT)
-    
-    print(f"[Camera] Opened successfully")
-    print(f"[AI] Model loaded: {config.MODEL_PATH}")
-    print(f"[AI] Confidence threshold: {config.CONFIDENCE_THRESHOLD}")
-    print(f"[AI] NMS threshold: {config.NMS_THRESHOLD}")
-    print("\nStarting live feed...\n")
-    
-    snapshot_count = 0
-    
-    while True:
-        ret, frame = cap.read()
-        
-        if not ret:
-            print("[ERROR] Failed to read frame")
-            break
-        
-        # Create display frame
-        display_frame = frame.copy()
-        
-        # Show instructions
-        cv2.putText(display_frame, "Press SPACE to detect", (10, 30),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(display_frame, "Press 'q' to quit", (10, 60),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        cv2.putText(display_frame, "Press 's' to save", (10, 90),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-        
-        # Show frame
-        cv2.imshow('AI Model Test - Live Camera', display_frame)
-        
-        # Handle keyboard
-        key = cv2.waitKey(1) & 0xFF
-        
-        if key == ord('q'):
-            print("\n[Info] Quitting...")
-            break
-        
-        elif key == ord(' '):
-            # Run detection
-            print("\n" + "=" * 60)
-            print("Running AI detection...")
-            print("=" * 60)
-            
-            result_dict = ai.predict(frame)
-            
-            # Print results
-            print(f"\n[Result] {result_dict['result']}")
-            print(f"[Reason] {result_dict['reason']}")
-            print(f"[Time] {result_dict['processing_time_ms']:.1f}ms")
-            print(f"\n[Detections] {len(result_dict['detections'])} objects found:")
-            
-            for i, det in enumerate(result_dict['detections'], 1):
-                print(f"  {i}. {det['class_name']} (confidence: {det['confidence']:.2f})")
-            
-            print(f"\n[Components]")
-            print(f"  - Cap: {'✅' if result_dict['has_cap'] else '❌'}")
-            print(f"  - Filled: {'✅' if result_dict['has_filled'] else '❌'}")
-            print(f"  - Label: {'✅' if result_dict['has_label'] else '❌'}")
-            print(f"  - Defects: {', '.join(result_dict['defects_found']) if result_dict['defects_found'] else 'None'}")
-            
-            print("=" * 60 + "\n")
-            
-            # Show annotated image
-            cv2.imshow('AI Detection Result', result_dict['annotated_image'])
-        
-        elif key == ord('s'):
-            # Save snapshot
-            snapshot_count += 1
-            filename = f"test_snapshot_{snapshot_count}.jpg"
-            cv2.imwrite(filename, frame)
-            print(f"[Saved] {filename}")
-    
-    cap.release()
-    cv2.destroyAllWindows()
+CLASS_NAMES = [
+    'Cap-Defect', 'Filling-Defect', 'Label-Defect', 'Wrong-Product',
+    'cap', 'coca', 'filled', 'label'
+]
 
 
-def test_with_image(image_path):
-    """
-    Test AI model with a single image
-    """
-    print("=" * 60)
-    print("  AI MODEL TESTING - IMAGE FILE")
-    print("=" * 60)
-    print(f"\nImage: {image_path}\n")
-    
-    # Check if image exists
-    if not os.path.exists(image_path):
-        print(f"[ERROR] Image not found: {image_path}")
-        return
-    
-    # Load image
-    image = cv2.imread(image_path)
-    
-    if image is None:
-        print(f"[ERROR] Failed to load image: {image_path}")
-        return
-    
-    print(f"[Image] Loaded: {image.shape[1]}x{image.shape[0]}")
-    
-    # Initialize AI
-    ai = AIEngine()
-    
-    if not ai.model_loaded:
-        print("[ERROR] AI model failed to load!")
-        return
-    
-    print(f"[AI] Model loaded: {config.MODEL_PATH}")
-    print(f"[AI] Running detection...\n")
-    
-    # Run detection
-    result_dict = ai.predict(image)
-    
-    # Print results
-    print("=" * 60)
-    print("DETECTION RESULTS")
-    print("=" * 60)
-    print(f"\n[Result] {result_dict['result']}")
-    print(f"[Reason] {result_dict['reason']}")
-    print(f"[Processing Time] {result_dict['processing_time_ms']:.1f}ms")
-    print(f"\n[Detections] {len(result_dict['detections'])} objects found:")
-    
-    for i, det in enumerate(result_dict['detections'], 1):
-        x1, y1, x2, y2 = det['bbox']
-        print(f"  {i}. {det['class_name']}")
-        print(f"     - Confidence: {det['confidence']:.2f}")
-        print(f"     - BBox: ({x1}, {y1}) -> ({x2}, {y2})")
-    
-    print(f"\n[Components Check]")
-    print(f"  - Cap: {'✅ Found' if result_dict['has_cap'] else '❌ Missing'}")
-    print(f"  - Filled: {'✅ Found' if result_dict['has_filled'] else '❌ Missing'}")
-    print(f"  - Label: {'✅ Found' if result_dict['has_label'] else '❌ Missing'}")
-    
-    if result_dict['defects_found']:
-        print(f"\n[Defects Detected] ⚠️")
-        for defect in result_dict['defects_found']:
-            print(f"  - {defect}")
-    else:
-        print(f"\n[Defects] None detected ✅")
-    
-    print("\n" + "=" * 60 + "\n")
-    
-    # Show images
-    print("Displaying images...")
-    print("Press any key to close windows")
-    
-    # Original image
-    cv2.imshow('Original Image', image)
-    
-    # Annotated image with detections
-    cv2.imshow('AI Detection Result', result_dict['annotated_image'])
-    
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    
-    # Save result
-    output_path = image_path.replace('.jpg', '_result.jpg').replace('.png', '_result.png')
-    cv2.imwrite(output_path, result_dict['annotated_image'])
-    print(f"\n[Saved] Result: {output_path}")
+def load_model():
+    """Load NCNN model"""
+    if not os.path.exists(MODEL_PARAM) or not os.path.exists(MODEL_BIN):
+        print(f"❌ Model files not found!")
+        return None
+
+    net = ncnn.Net()
+    net.opt.use_vulkan_compute = False
+    net.opt.num_threads = 4
+
+    ret_param = net.load_param(MODEL_PARAM)
+    ret_model = net.load_model(MODEL_BIN)
+
+    if ret_param != 0 or ret_model != 0:
+        print(f"❌ Failed to load model!")
+        return None
+
+    print(f"✓ Model loaded")
+    return net
 
 
-def test_with_directory(directory_path):
-    """
-    Test AI model with all images in a directory
-    """
-    print("=" * 60)
-    print("  AI MODEL TESTING - DIRECTORY")
-    print("=" * 60)
-    print(f"\nDirectory: {directory_path}\n")
-    
-    # Check if directory exists
-    if not os.path.exists(directory_path):
-        print(f"[ERROR] Directory not found: {directory_path}")
-        return
-    
-    # Get all image files
-    image_extensions = ['.jpg', '.jpeg', '.png', '.bmp']
-    image_files = [f for f in os.listdir(directory_path) 
-                   if os.path.splitext(f)[1].lower() in image_extensions]
-    
-    if len(image_files) == 0:
-        print(f"[ERROR] No image files found in {directory_path}")
-        return
-    
-    print(f"[Found] {len(image_files)} images")
-    
-    # Initialize AI
-    ai = AIEngine()
-    
-    if not ai.model_loaded:
-        print("[ERROR] AI model failed to load!")
-        return
-    
-    print(f"[AI] Model loaded: {config.MODEL_PATH}\n")
-    
-    # Process each image
-    ok_count = 0
-    ng_count = 0
-    
-    for i, filename in enumerate(image_files, 1):
-        image_path = os.path.join(directory_path, filename)
-        
-        print(f"\n[{i}/{len(image_files)}] Processing: {filename}")
-        
-        # Load image
-        image = cv2.imread(image_path)
-        
-        if image is None:
-            print(f"  [ERROR] Failed to load image")
+def parse_method_1(output, img_w, img_h):
+    """Method 1: YOLOv8 standard format (x,y,w,h normalized)"""
+    detections = []
+    out_np = np.array(output)
+
+    if len(out_np.shape) == 3:
+        out_np = out_np[0]
+
+    if out_np.shape[0] < out_np.shape[1]:
+        out_np = out_np.T
+
+    for detection in out_np:
+        if len(detection) < 4 + len(CLASS_NAMES):
             continue
-        
-        # Run detection
-        result_dict = ai.predict(image)
-        
-        # Update counters
-        if result_dict['result'] == 'O':
-            ok_count += 1
-        else:
-            ng_count += 1
-        
-        # Print result
-        result_icon = "✅" if result_dict['result'] == 'O' else "❌"
-        print(f"  {result_icon} Result: {result_dict['result']} - {result_dict['reason']}")
-        print(f"  ⏱ Time: {result_dict['processing_time_ms']:.1f}ms")
-        print(f"  🔍 Detections: {len(result_dict['detections'])}")
-        
-        # Save annotated image
-        output_path = image_path.replace('.jpg', '_result.jpg').replace('.png', '_result.png')
-        cv2.imwrite(output_path, result_dict['annotated_image'])
-    
-    # Print summary
-    print("\n" + "=" * 60)
-    print("SUMMARY")
-    print("=" * 60)
-    print(f"\nTotal: {len(image_files)}")
-    print(f"✅ OK: {ok_count}")
-    print(f"❌ NG: {ng_count}")
-    print(f"\nAccuracy: {(ok_count / len(image_files) * 100) if len(image_files) > 0 else 0:.1f}%")
-    print("\n" + "=" * 60)
+
+        # Tọa độ đã normalized (0-640)
+        x_center = detection[0]
+        y_center = detection[1]
+        width = detection[2]
+        height = detection[3]
+
+        class_scores = detection[4:4 + len(CLASS_NAMES)]
+        class_id = np.argmax(class_scores)
+        confidence = class_scores[class_id]
+
+        if confidence > CONFIDENCE_THRESHOLD:
+            # Scale to image size
+            x_center = x_center * img_w / INPUT_SIZE
+            y_center = y_center * img_h / INPUT_SIZE
+            width = width * img_w / INPUT_SIZE
+            height = height * img_h / INPUT_SIZE
+
+            x1 = int(x_center - width / 2)
+            y1 = int(y_center - height / 2)
+            x2 = int(x_center + width / 2)
+            y2 = int(y_center + height / 2)
+
+            x1 = max(0, min(x1, img_w))
+            y1 = max(0, min(y1, img_h))
+            x2 = max(0, min(x2, img_w))
+            y2 = max(0, min(y2, img_h))
+
+            if x2 > x1 and y2 > y1:
+                detections.append({
+                    'class_id': int(class_id),
+                    'class_name': CLASS_NAMES[class_id],
+                    'confidence': float(confidence),
+                    'bbox': [x1, y1, x2, y2]
+                })
+
+    return detections
+
+
+def parse_method_2(output, img_w, img_h):
+    """Method 2: Coordinates already in pixel space"""
+    detections = []
+    out_np = np.array(output)
+
+    if len(out_np.shape) == 3:
+        out_np = out_np[0]
+
+    if out_np.shape[0] < out_np.shape[1]:
+        out_np = out_np.T
+
+    for detection in out_np:
+        if len(detection) < 4 + len(CLASS_NAMES):
+            continue
+
+        # Tọa độ đã là pixel (trong ảnh 640x640)
+        x_center = detection[0]
+        y_center = detection[1]
+        width = detection[2]
+        height = detection[3]
+
+        class_scores = detection[4:4 + len(CLASS_NAMES)]
+        class_id = np.argmax(class_scores)
+        confidence = class_scores[class_id]
+
+        if confidence > CONFIDENCE_THRESHOLD:
+            # Không cần scale, chỉ convert to corners
+            x1 = int(x_center - width / 2)
+            y1 = int(y_center - height / 2)
+            x2 = int(x_center + width / 2)
+            y2 = int(y_center + height / 2)
+
+            # Scale to original image size
+            scale_x = img_w / INPUT_SIZE
+            scale_y = img_h / INPUT_SIZE
+
+            x1 = int(x1 * scale_x)
+            y1 = int(y1 * scale_y)
+            x2 = int(x2 * scale_x)
+            y2 = int(y2 * scale_y)
+
+            x1 = max(0, min(x1, img_w))
+            y1 = max(0, min(y1, img_h))
+            x2 = max(0, min(x2, img_w))
+            y2 = max(0, min(y2, img_h))
+
+            if x2 > x1 and y2 > y1:
+                detections.append({
+                    'class_id': int(class_id),
+                    'class_name': CLASS_NAMES[class_id],
+                    'confidence': float(confidence),
+                    'bbox': [x1, y1, x2, y2]
+                })
+
+    return detections
+
+
+def parse_method_3(output, img_w, img_h):
+    """Method 3: Using OpenCV DNN NMSBoxes"""
+    detections = []
+    out_np = np.array(output)
+
+    if len(out_np.shape) == 3:
+        out_np = out_np[0]
+
+    if out_np.shape[0] < out_np.shape[1]:
+        out_np = out_np.T
+
+    boxes = []
+    confidences = []
+    class_ids = []
+
+    for detection in out_np:
+        if len(detection) < 4 + len(CLASS_NAMES):
+            continue
+
+        class_scores = detection[4:4 + len(CLASS_NAMES)]
+        class_id = np.argmax(class_scores)
+        confidence = class_scores[class_id]
+
+        if confidence > CONFIDENCE_THRESHOLD:
+            x_center = detection[0]
+            y_center = detection[1]
+            width = detection[2]
+            height = detection[3]
+
+            # Scale to original image
+            scale_x = img_w / INPUT_SIZE
+            scale_y = img_h / INPUT_SIZE
+
+            x_center *= scale_x
+            y_center *= scale_y
+            width *= scale_x
+            height *= scale_y
+
+            x1 = int(x_center - width / 2)
+            y1 = int(y_center - height / 2)
+
+            boxes.append([x1, y1, int(width), int(height)])
+            confidences.append(float(confidence))
+            class_ids.append(int(class_id))
+
+    # Apply NMS using OpenCV
+    if len(boxes) > 0:
+        indices = cv2.dnn.NMSBoxes(boxes, confidences, CONFIDENCE_THRESHOLD, 0.45)
+
+        if len(indices) > 0:
+            for i in indices.flatten():
+                box = boxes[i]
+                x1, y1, w, h = box
+                x2 = x1 + w
+                y2 = y1 + h
+
+                x1 = max(0, min(x1, img_w))
+                y1 = max(0, min(y1, img_h))
+                x2 = max(0, min(x2, img_w))
+                y2 = max(0, min(y2, img_h))
+
+                if x2 > x1 and y2 > y1:
+                    detections.append({
+                        'class_id': class_ids[i],
+                        'class_name': CLASS_NAMES[class_ids[i]],
+                        'confidence': confidences[i],
+                        'bbox': [x1, y1, x2, y2]
+                    })
+
+    return detections
 
 
 def main():
-    """Main function"""
-    print("\n" + "=" * 60)
-    print("  AI MODEL TESTING TOOL")
     print("=" * 60)
-    
-    if len(sys.argv) == 1:
-        # No arguments - use live camera
-        test_with_camera()
-    
-    elif len(sys.argv) == 2:
-        arg = sys.argv[1]
-        
-        if os.path.isfile(arg):
-            # Single image file
-            test_with_image(arg)
-        
-        elif os.path.isdir(arg):
-            # Directory of images
-            test_with_directory(arg)
-        
+    print("🔍 DEBUG MODE - Testing Multiple Parse Methods")
+    print("=" * 60)
+    print()
+
+    net = load_model()
+    if net is None:
+        return
+
+    cap = cv2.VideoCapture(0)
+    if not cap.isOpened():
+        print("❌ Cannot open camera!")
+        return
+
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+    actual_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    actual_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+    print(f"✓ Camera: {actual_width}x{actual_height}")
+    print()
+    print("CONTROLS:")
+    print("  1 - Method 1 (normalized coords)")
+    print("  2 - Method 2 (pixel coords)")
+    print("  3 - Method 3 (OpenCV NMS)")
+    print("  Q - Quit")
+    print("=" * 60)
+    print()
+
+    current_method = 1
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            continue
+
+        # Preprocess
+        img = cv2.resize(frame, (INPUT_SIZE, INPUT_SIZE))
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+
+        # Create NCNN Mat
+        mat_in = ncnn.Mat.from_pixels(
+            img_rgb,
+            ncnn.Mat.PixelType.PIXEL_RGB,
+            INPUT_SIZE,
+            INPUT_SIZE
+        )
+
+        mat_in.substract_mean_normalize([0, 0, 0], [1 / 255.0, 1 / 255.0, 1 / 255.0])
+
+        # Inference
+        with net.create_extractor() as ex:
+            ex.input("in0", mat_in)
+            ret, mat_out = ex.extract("out0")
+
+        # Parse với method được chọn
+        if current_method == 1:
+            detections = parse_method_1(mat_out, actual_width, actual_height)
+        elif current_method == 2:
+            detections = parse_method_2(mat_out, actual_width, actual_height)
         else:
-            print(f"\n[ERROR] Invalid path: {arg}")
-            print("\nUsage:")
-            print("  python test_model.py                  # Live camera")
-            print("  python test_model.py image.jpg        # Single image")
-            print("  python test_model.py images/          # Directory")
-    
-    else:
-        print("\n[ERROR] Too many arguments")
-        print("\nUsage:")
-        print("  python test_model.py                  # Live camera")
-        print("  python test_model.py image.jpg        # Single image")
-        print("  python test_model.py images/          # Directory")
+            detections = parse_method_3(mat_out, actual_width, actual_height)
+
+        # Draw
+        for det in detections:
+            x1, y1, x2, y2 = det['bbox']
+            color = (0, 255, 0)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+            label = f"{det['class_name']}: {det['confidence']:.2f}"
+            cv2.putText(frame, label, (x1, y1 - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+
+        # Info
+        cv2.rectangle(frame, (10, 10), (400, 100), (0, 0, 0), -1)
+        cv2.putText(frame, f"Method: {current_method}", (20, 35),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+        cv2.putText(frame, f"Detections: {len(detections)}", (20, 65),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.putText(frame, "Press 1/2/3 to change method", (20, 90),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+
+        cv2.imshow('Debug Mode', frame)
+
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord('q') or key == ord('Q'):
+            break
+        elif key == ord('1'):
+            current_method = 1
+            print(f"→ Switched to Method 1")
+        elif key == ord('2'):
+            current_method = 2
+            print(f"→ Switched to Method 2")
+        elif key == ord('3'):
+            current_method = 3
+            print(f"→ Switched to Method 3")
+
+    cap.release()
+    cv2.destroyAllWindows()
+    print("Done!")
 
 
 if __name__ == "__main__":
