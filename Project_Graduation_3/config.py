@@ -6,9 +6,9 @@
 # ============================================
 # AI MODEL SETTINGS (NCNN)
 # ============================================
-MODEL_PATH = "model"
-MODEL_PARAM = "best.ncnn.param"
-MODEL_BIN = "best.ncnn.bin"
+MODEL_PATH = "model/best_ncnn_model"  # Updated to match actual folder
+MODEL_PARAM = "model.ncnn.param"       # Actual filename
+MODEL_BIN = "model.ncnn.bin"           # Actual filename
 INPUT_SIZE = 640
 
 # Detection Thresholds
