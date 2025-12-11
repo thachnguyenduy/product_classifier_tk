@@ -32,8 +32,13 @@ class MainWindow:
         self.system_running = False
         self.product_queue = []  # FIFO Queue: [(result, reason, timestamp, image), ...]
         self.last_detection_time = 0  # For cooldown
+        self.last_queue_time = 0  # For queue cooldown (when crossing line)
         self.tracked_bottles = {}  # Track bottles: {id: {'cx': x, 'cy': y, 'last_seen': time}}
         self.next_bottle_id = 0
+        
+        # Continuous detection state
+        self.last_ai_result = None  # Last AI detection result (for display)
+        self.processing_ai = False  # Flag to prevent concurrent AI processing
         
         # Statistics
         self.total_count = 0
@@ -177,9 +182,12 @@ class MainWindow:
             # Draw virtual line
             self._draw_virtual_line(frame)
             
-            # Check for bottle crossing (only if system running)
             if self.system_running:
+                # LINE CROSSING CHECK - Blob detection và line crossing logic
                 self._check_crossing(frame)
+                
+                # CONTINUOUS AI DETECTION - Hiển thị AI bounding boxes (sau blob detection)
+                self._run_continuous_ai_detection(frame)
             
             # Convert to Tkinter format
             frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -373,22 +381,121 @@ class MainWindow:
                     self.last_detection_time = current_time
                     return
     
+    def _run_continuous_ai_detection(self, frame):
+        """
+        Run AI detection continuously to show bounding boxes
+        
+        This runs every frame but does NOT add to queue
+        Only for visual display
+        """
+        current_time = time.time()
+        
+        # Throttle: Run AI every 0.3 seconds (~3 FPS) to avoid overload
+        if current_time - getattr(self, '_last_ai_time', 0) < 0.3:
+            # Draw last result on current frame
+            if self.last_ai_result is not None:
+                self._draw_ai_results_on_frame(frame, self.last_ai_result)
+            return
+        
+        # Run AI in background if not already processing
+        if not self.processing_ai:
+            self.processing_ai = True
+            self._last_ai_time = current_time
+            threading.Thread(target=self._process_continuous_ai, args=(frame.copy(),), daemon=True).start()
+        elif self.last_ai_result is not None:
+            # Draw cached result while processing
+            self._draw_ai_results_on_frame(frame, self.last_ai_result)
+    
+    def _draw_ai_results_on_frame(self, frame, result_dict):
+        """
+        Draw AI detection results on frame
+        """
+        if result_dict is None or 'detections' not in result_dict:
+            return
+        
+        for det in result_dict['detections']:
+            x1, y1, x2, y2 = det['box']
+            class_id = det['cls']
+            confidence = det['conf']
+            class_name = self.ai.class_names[class_id]
+            
+            # Choose color
+            if class_id < 4:  # Defects
+                color = (0, 0, 255)  # Red
+            else:  # Good parts
+                color = (0, 255, 0)  # Green
+            
+            # Draw box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            
+            # Draw label
+            label = f"{class_name}: {confidence:.2f}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            cv2.rectangle(frame, (x1, y1 - th - 4), (x1 + tw, y1), color, -1)
+            cv2.putText(frame, label, (x1, y1 - 2), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+    
+    def _process_continuous_ai(self, frame):
+        """
+        Process AI detection for continuous display (NOT for queue)
+        """
+        try:
+            result_dict = self.ai.predict(frame)
+            
+            # Cache result for display
+            self.last_ai_result = result_dict
+            
+            # Update detection display panel
+            self.root.after(0, lambda: self._update_detection_display(
+                result_dict['annotated_image'],
+                result_dict['result'],
+                result_dict.get('reason', '')
+            ))
+            
+            if config.DEBUG_MODE:
+                num_detections = len(result_dict['detections'])
+                if num_detections > 0:
+                    print(f"[AI] Continuous detection: {num_detections} objects")
+                    for det in result_dict['detections'][:3]:  # Show first 3
+                        print(f"  - {self.ai.class_names[det['cls']]}: {det['conf']:.2f}")
+                else:
+                    print(f"[AI] Continuous detection: No objects found")
+            
+        except Exception as e:
+            print(f"[ERROR] Continuous AI detection failed: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self.processing_ai = False
+    
     def _on_bottle_detected(self, frame, cx, cy):
         """
         Called when bottle crosses virtual line
         
         Actions:
         1. Run AI prediction
-        2. Add result to FIFO queue
+        2. Add result to FIFO queue (ONLY when crossing line)
         3. Save snapshot
         """
-        print(f"[UI] Bottle detected at ({cx}, {cy})")
+        current_time = time.time()
+        
+        # Queue cooldown (prevent multiple adds)
+        if current_time - self.last_queue_time < config.DETECTION_COOLDOWN:
+            if config.DEBUG_MODE:
+                print(f"[UI] Queue cooldown active, skipping...")
+            return
+        
+        print(f"[UI] Bottle crossed line at ({cx}, {cy}) - Adding to queue")
         
         # Run AI prediction in separate thread to avoid blocking UI
-        threading.Thread(target=self._process_detection, args=(frame.copy(),), daemon=True).start()
+        threading.Thread(target=self._process_detection_for_queue, args=(frame.copy(),), daemon=True).start()
     
-    def _process_detection(self, frame):
-        """Process detection in background thread"""
+    def _process_detection_for_queue(self, frame):
+        """
+        Process detection when bottle crosses line - ADD TO QUEUE
+        
+        This is called ONLY when bottle crosses the virtual line
+        """
         try:
             # Run AI
             result_dict = self.ai.predict(frame)
@@ -401,16 +508,17 @@ class MainWindow:
             # Save snapshot
             image_path = self._save_snapshot(annotated_image, result)
             
-            # Add to queue
+            # Add to queue (ONLY when crossing line)
             queue_item = {
                 'result': result,
                 'reason': reason,
                 'timestamp': timestamp,
                 'image_path': image_path,
-                'annotated_image': annotated_image  # Store for display
+                'annotated_image': annotated_image
             }
             
             self.product_queue.append(queue_item)
+            self.last_queue_time = time.time()
             
             # Update UI (queue + detection display)
             self.root.after(0, lambda: self._update_detection_display(annotated_image, result, reason))
@@ -420,13 +528,12 @@ class MainWindow:
             result_dict['image_path'] = image_path
             self.database.add_inspection(result_dict)
             
-            print(f"[UI] Added to queue: {result} | Queue size: {len(self.product_queue)}")
+            print(f"[UI] ✅ Added to queue: {result} | Reason: {reason} | Queue size: {len(self.product_queue)}")
             
         except Exception as e:
-            print(f"[ERROR] Detection processing failed: {e}")
+            print(f"[ERROR] Queue detection processing failed: {e}")
             import traceback
             traceback.print_exc()
-            self.processing = False
     
     def on_trigger_received(self):
         """

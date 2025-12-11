@@ -161,28 +161,50 @@ class AIEngine:
     
     def _run_inference(self, mat_in, orig_w, orig_h):
         try:
+            if config.DEBUG_MODE:
+                print(f"[AI] Inference: Starting...")
+            
             ex = self.net.create_extractor()
             ex.set_vulkan_compute(False)
+            
+            if config.DEBUG_MODE:
+                print(f"[AI] Inference: Input blob='{self.input_blob_name}'")
             
             ret_input = ex.input(self.input_blob_name, mat_in)
             if ret_input != 0:
                 print(f"[ERROR] Input failed (code={ret_input})")
                 return []
             
+            if config.DEBUG_MODE:
+                print(f"[AI] Inference: Input set successfully")
+            
             all_detections = []
             
             for output_name in self.output_blob_names:
+                if config.DEBUG_MODE:
+                    print(f"[AI] Inference: Extracting output '{output_name}'...")
+                
                 ret, mat_out = ex.extract(output_name)
                 if ret != 0:
+                    if config.DEBUG_MODE:
+                        print(f"[AI] Inference: Extract '{output_name}' failed (code={ret})")
                     continue
+                
+                if config.DEBUG_MODE:
+                    print(f"[AI] Inference: Extract '{output_name}' successful")
                 
                 detections = self._decode_yolo_output(mat_out, orig_w, orig_h)
                 all_detections.extend(detections)
             
             if not all_detections and self.output_blob_names:
+                if config.DEBUG_MODE:
+                    print(f"[AI] Inference: No detections, trying fallback...")
                 ret, mat_out = ex.extract(self.output_blob_names[0])
                 if ret == 0:
                     all_detections = self._decode_yolo_output(mat_out, orig_w, orig_h)
+            
+            if config.DEBUG_MODE:
+                print(f"[AI] Inference: Total detections: {len(all_detections)}")
             
             return all_detections
             
@@ -198,25 +220,47 @@ class AIEngine:
         try:
             out_np = np.array(output)
             
+            if config.DEBUG_MODE:
+                print(f"[AI] Decode: Raw output shape={out_np.shape}, dtype={out_np.dtype}")
+            
             if len(out_np.shape) == 3:
                 out_np = out_np[0]
+                if config.DEBUG_MODE:
+                    print(f"[AI] Decode: Removed batch dim, shape={out_np.shape}")
             
             if len(out_np.shape) == 2:
                 if out_np.shape[0] < out_np.shape[1]:
                     out_np = out_np.T
+                    if config.DEBUG_MODE:
+                        print(f"[AI] Decode: Transposed, shape={out_np.shape}")
             
             if len(out_np.shape) != 2:
+                if config.DEBUG_MODE:
+                    print(f"[AI] Decode: ERROR - Unexpected shape {out_np.shape}")
                 return []
             
             num_anchors, num_features = out_np.shape
             
+            if config.DEBUG_MODE:
+                print(f"[AI] Decode: Processing {num_anchors} anchors, {num_features} features")
+                print(f"[AI] Decode: Expected {4 + self.num_classes} features, got {num_features}")
+            
             if num_features < 4 + self.num_classes:
+                if config.DEBUG_MODE:
+                    print(f"[AI] Decode: ERROR - Not enough features")
                 return []
             
             scale_x = img_w / self.input_size
             scale_y = img_h / self.input_size
             
-            for i in range(num_anchors):
+            if config.DEBUG_MODE:
+                print(f"[AI] Decode: Scale factors: x={scale_x:.3f}, y={scale_y:.3f}")
+                print(f"[AI] Decode: Confidence threshold: {self.conf_threshold}")
+            
+            valid_count = 0
+            filtered_count = 0
+            
+            for i in range(min(num_anchors, 1000)):  # Limit to first 1000 for performance
                 row = out_np[i]
                 
                 if len(row) < 4 + self.num_classes:
@@ -239,13 +283,22 @@ class AIEngine:
                 max_val = np.max(class_scores)
                 min_val = np.min(class_scores)
                 
+                if config.DEBUG_MODE and valid_count < 3:
+                    print(f"[AI] Decode: Sample #{valid_count}: scores range=[{min_val:.3f}, {max_val:.3f}]")
+                
                 if max_val > 5.0 or min_val < -5.0:
                     class_scores = 1.0 / (1.0 + np.exp(-np.clip(class_scores, -500, 500)))
+                    if config.DEBUG_MODE and valid_count < 3:
+                        print(f"[AI] Decode: Applied sigmoid (was logits)")
                 
                 class_id = int(np.argmax(class_scores))
                 confidence = float(np.clip(class_scores[class_id], 0.0, 1.0))
                 
+                if config.DEBUG_MODE and valid_count < 3:
+                    print(f"[AI] Decode: Best class: {self.class_names[class_id]} (id={class_id}), conf={confidence:.3f}")
+                
                 if confidence < self.conf_threshold:
+                    filtered_count += 1
                     continue
                 
                 x_center_scaled = x_center * scale_x
@@ -270,6 +323,14 @@ class AIEngine:
                         'confidence': confidence,
                         'bbox': [x1, y1, x2, y2]
                     })
+                    
+                    if config.DEBUG_MODE:
+                        print(f"[AI] Decode: ✅ Detection: {self.class_names[class_id]} ({confidence:.2f}) at [{x1}, {y1}, {x2}, {y2}]")
+                
+                valid_count += 1
+            
+            if config.DEBUG_MODE:
+                print(f"[AI] Decode: Total valid: {valid_count}, Filtered by threshold: {filtered_count}, Final detections: {len(detections)}")
         
         except Exception as e:
             print(f"[ERROR] Decode failed: {e}")

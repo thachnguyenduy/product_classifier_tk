@@ -12,7 +12,7 @@ MODEL_BIN = "model.ncnn.bin"           # Actual filename
 INPUT_SIZE = 640
 
 # Detection Thresholds
-CONFIDENCE_THRESHOLD = 0.5
+CONFIDENCE_THRESHOLD = 0.3  # Reduced for better detection (was 0.5)
 NMS_THRESHOLD = 0.45
 
 # Class Names (8 classes)
