@@ -62,12 +62,23 @@ class MainWindow:
         main_frame.columnconfigure(1, weight=1)
         main_frame.rowconfigure(0, weight=1)
         
-        # === LEFT: VIDEO ===
-        video_frame = ttk.LabelFrame(main_frame, text="📹 Live Camera (Virtual Line)", padding="10")
-        video_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
+        # === LEFT: VIDEO + DETECTION ===
+        left_container = ttk.Frame(main_frame)
+        left_container.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
+        
+        # Live camera
+        video_frame = ttk.LabelFrame(left_container, text="📹 Live Camera (Virtual Line)", padding="5")
+        video_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
         
         self.video_label = ttk.Label(video_frame, text="Camera Feed", background="black")
         self.video_label.pack(fill=tk.BOTH, expand=True)
+        
+        # Last AI Detection Result
+        detection_frame = ttk.LabelFrame(left_container, text="🤖 Last AI Detection", padding="5")
+        detection_frame.pack(fill=tk.BOTH, expand=True)
+        
+        self.detection_label = ttk.Label(detection_frame, text="Waiting for detection...", background="gray")
+        self.detection_label.pack(fill=tk.BOTH, expand=True)
         
         # === RIGHT: CONTROLS & QUEUE ===
         right_frame = ttk.Frame(main_frame)
@@ -316,21 +327,24 @@ class MainWindow:
             result = result_dict['result']
             reason = result_dict['reason']
             timestamp = datetime.now().strftime("%H:%M:%S")
+            annotated_image = result_dict['annotated_image']
             
             # Save snapshot
-            image_path = self._save_snapshot(result_dict['annotated_image'], result)
+            image_path = self._save_snapshot(annotated_image, result)
             
             # Add to queue
             queue_item = {
                 'result': result,
                 'reason': reason,
                 'timestamp': timestamp,
-                'image_path': image_path
+                'image_path': image_path,
+                'annotated_image': annotated_image  # Store for display
             }
             
             self.product_queue.append(queue_item)
             
-            # Update queue display
+            # Update UI (queue + detection display)
+            self.root.after(0, lambda: self._update_detection_display(annotated_image, result, reason))
             self.root.after(0, self._update_queue_display)
             
             # Log to database
@@ -343,6 +357,7 @@ class MainWindow:
             print(f"[ERROR] Detection processing failed: {e}")
             import traceback
             traceback.print_exc()
+            self.processing = False
     
     def on_trigger_received(self):
         """
@@ -408,6 +423,35 @@ class MainWindow:
         stats_text += f"❌ NG: {self.ng_count}"
         
         self.stats_label.config(text=stats_text)
+    
+    def _update_detection_display(self, annotated_image, result, reason):
+        """Update detection display with AI annotated image"""
+        try:
+            # Convert OpenCV image to Tkinter format
+            img_rgb = cv2.cvtColor(annotated_image, cv2.COLOR_BGR2RGB)
+            
+            # Resize to fit display (adjust as needed)
+            display_width = 400
+            h, w = img_rgb.shape[:2]
+            aspect_ratio = h / w
+            display_height = int(display_width * aspect_ratio)
+            
+            img_resized = cv2.resize(img_rgb, (display_width, display_height))
+            img_pil = Image.fromarray(img_resized)
+            img_tk = ImageTk.PhotoImage(image=img_pil)
+            
+            # Update label
+            self.detection_label.imgtk = img_tk
+            self.detection_label.configure(image=img_tk)
+            
+            # Update frame title with result
+            detection_frame = self.detection_label.master
+            result_color = "green" if result == 'O' else "red"
+            result_text = "✅ OK" if result == 'O' else "❌ NG"
+            detection_frame.config(text=f"🤖 Last AI Detection - {result_text} ({reason})")
+            
+        except Exception as e:
+            print(f"[ERROR] Update detection display failed: {e}")
     
     def _save_snapshot(self, image, result):
         """Save annotated snapshot"""
