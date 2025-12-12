@@ -250,8 +250,9 @@ class AIEngine:
         """Run NCNN inference (OPTIMIZED)"""
         try:
             # Create extractor
+            # Note: Vulkan setting is already configured at network level
+            # self.net.opt.use_vulkan_compute = False (in __init__)
             ex = self.net.create_extractor()
-            ex.set_vulkan_compute(False)
             
             # Input
             ret_input = ex.input(self.input_blob_name, mat_in)
@@ -275,6 +276,8 @@ class AIEngine:
             
         except Exception as e:
             print(f"[ERROR] Inference failed: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def _decode_yolo_output(self, output, img_w, img_h):

@@ -105,7 +105,7 @@ try:
     
     print("  - Creating extractor...")
     ex = net.create_extractor()
-    ex.set_vulkan_compute(False)  # CPU mode
+    # Vulkan is already disabled at network level
     
     print("  - Setting input 'in0'...")
     ret_input = ex.input("in0", mat_in)
