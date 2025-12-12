@@ -46,6 +46,11 @@ class MainWindow:
         self.system_running = False
         self.classification_queue = []  # Queue of (result, reason, timestamp, object_id)
         
+        # AI throttling (để giảm lag)
+        self.last_ai_time = 0
+        self.ai_interval = 0.1  # Chỉ chạy AI mỗi 100ms (10 FPS AI, 30 FPS camera)
+        self.last_ai_result = None  # Cache AI result
+        
         # Statistics
         self.total_count = 0
         self.ok_count = 0
@@ -221,25 +226,34 @@ class MainWindow:
         print("="*60 + "\n")
     
     def _update_video_loop(self):
-        """Continuous video update loop (OPTIMIZED)"""
+        """Continuous video update loop (OPTIMIZED - THROTTLED AI)"""
         try:
             frame = self.camera.get_frame()
             
             if frame is not None:
-                # Draw virtual line
+                # Draw virtual line (luôn vẽ)
                 self._draw_virtual_line(frame)
                 
                 if self.system_running:
-                    # Run AI detection and tracking
-                    result = self.ai.predict_and_track(frame)
+                    # THROTTLE AI - CHỈ CHẠY MỖI 100ms (giảm lag)
+                    current_time = time.time()
+                    if current_time - self.last_ai_time >= self.ai_interval:
+                        self.last_ai_time = current_time
+                        
+                        # Run AI detection and tracking
+                        result = self.ai.predict_and_track(frame)
+                        
+                        # Cache result
+                        self.last_ai_result = result
+                        
+                        # Handle crossed objects
+                        for crossed_obj in result['crossed_objects']:
+                            self._on_bottle_crossed_line(crossed_obj, frame)
                     
-                    # VẼ DETECTIONS ĐƠN GIẢN (không vẽ tracking boxes phức tạp)
-                    if 'detections' in result and len(result['detections']) > 0:
-                        self._draw_simple_detections(frame, result['detections'])
-                    
-                    # Handle crossed objects (đơn giản)
-                    for crossed_obj in result['crossed_objects']:
-                        self._on_bottle_crossed_line(crossed_obj, frame)
+                    # VẼ DETECTIONS từ cached result (nhanh)
+                    if hasattr(self, 'last_ai_result') and 'detections' in self.last_ai_result:
+                        if len(self.last_ai_result['detections']) > 0:
+                            self._draw_simple_detections(frame, self.last_ai_result['detections'])
                 
                 # Convert to Tkinter format (OPTIMIZED)
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -315,9 +329,10 @@ class MainWindow:
     def _draw_simple_detections(self, frame, detections):
         """
         Vẽ detections ĐƠN GIẢN - CHỈ BOX VÀ LABEL
-        Tối ưu cho performance (không vẽ quá nhiều)
+        Tối ưu cho performance (giới hạn số lượng vẽ)
         """
-        for det in detections:
+        # Giới hạn max 10 detections để vẽ (tăng tốc)
+        for det in detections[:10]:
             x1, y1, x2, y2 = det['bbox']
             class_id = det['class_id']
             class_name = det['class_name']
@@ -329,17 +344,17 @@ class MainWindow:
             else:  # Good classes
                 color = (0, 255, 0)  # Green
             
-            # Vẽ box (đơn giản)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            # Vẽ box (đơn giản, line mỏng hơn)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
             
-            # Label ngắn gọn
+            # Label ngắn gọn, font nhỏ hơn
             label = f"{class_name}: {confidence:.2f}"
             cv2.putText(
                 frame,
                 label,
                 (x1, y1 - 5),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
+                0.4,
                 color,
                 1
             )
