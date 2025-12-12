@@ -74,7 +74,7 @@ class SortingSystemApp:
         print("="*70)
         print(f"Version: {config.VERSION}")
         print(f"Mode: {config.MODE}")
-        print(f"Model: {config.MODEL_PATH_YOLO}")
+        print(f"Model: {config.MODEL_PATH_NCNN}")
         print("="*70 + "\n")
         
         self.root = None
