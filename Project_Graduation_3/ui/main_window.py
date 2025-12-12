@@ -233,7 +233,11 @@ class MainWindow:
                     # Run AI detection and tracking
                     result = self.ai.predict_and_track(frame)
                     
-                    # Draw tracking visualization
+                    # VẼ TẤT CẢ RAW DETECTIONS (để thấy model detect được gì)
+                    if 'detections' in result and len(result['detections']) > 0:
+                        self._draw_raw_detections(frame, result['detections'])
+                    
+                    # Draw tracking visualization (boxes lớn, đã group)
                     frame = self.ai.draw_tracking(frame, result['tracked_objects'])
                     
                     # Handle crossed objects
@@ -310,6 +314,44 @@ class MainWindow:
             config.LINE_COLOR,
             1
         )
+    
+    def _draw_raw_detections(self, frame, detections):
+        """
+        Vẽ TẤT CẢ raw detections từ model (trước khi tracking/grouping)
+        Để user thấy model đang detect được những gì
+        """
+        for det in detections:
+            x1, y1, x2, y2 = det['bbox']
+            class_id = det['class_id']
+            class_name = det['class_name']
+            confidence = det['confidence']
+            
+            # Màu sắc theo loại class
+            if class_id < 4:  # Defects
+                color = (0, 0, 255)  # Red
+            else:  # Good classes
+                color = (0, 255, 0)  # Green
+            
+            # Vẽ box mỏng (khác với tracking box dày)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
+            
+            # Vẽ label với background
+            label = f"{class_name}: {confidence:.2f}"
+            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
+            
+            # Background cho text
+            cv2.rectangle(frame, (x1, y1 - th - 4), (x1 + tw, y1), color, -1)
+            
+            # Text
+            cv2.putText(
+                frame,
+                label,
+                (x1, y1 - 2),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.4,
+                (255, 255, 255),
+                1
+            )
     
     def _on_bottle_crossed_line(self, tracked_obj, frame):
         """

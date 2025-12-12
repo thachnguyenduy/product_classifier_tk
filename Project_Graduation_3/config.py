@@ -22,7 +22,7 @@ MODEL_BIN = "model.ncnn.bin"
 INPUT_SIZE = 640
 
 # Detection Thresholds (optimized for speed)
-CONFIDENCE_THRESHOLD = 0.25  # Lowered for better detection
+CONFIDENCE_THRESHOLD = 0.20  # Lowered for better detection
 NMS_THRESHOLD = 0.45
 
 # Class Names (STRICT ORDER - DO NOT CHANGE)
