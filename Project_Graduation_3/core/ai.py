@@ -1,428 +1,398 @@
+# ============================================
+# AI ENGINE - YOLO Detection with Line Crossing
+# ============================================
+"""
+AI Engine for Coca-Cola Bottle Sorting System
+
+CRITICAL CLASSIFICATION RULES:
+1. NG if ANY defect class detected (Cap-Defect, Filling-Defect, Label-Defect, Wrong-Product)
+2. OK if ALL good classes (cap + label + filled) detected AND NO defects
+3. "coca" class is ONLY for identity confirmation, NOT for classification
+4. NO confidence score usage for classification
+5. Classification based ONLY on detected labels
+
+IMPORTANT: 
+- Line crossing finalizes classification
+- Each bottle has unique object_id
+- Continuously collect labels while bottle is RIGHT of line
+- When bottle CROSSES line (right to left), classification is LOCKED
+"""
+
 import cv2
 import numpy as np
-import os
 import time
-import re
-
-try:
-    import ncnn
-    NCNN_AVAILABLE = True
-except ImportError:
-    print("[ERROR] NCNN library not found. Please install: sudo apt-get install python3-ncnn")
-    NCNN_AVAILABLE = False
-
+from ultralytics import YOLO
 import config
 
 
-class AIEngine:
-    def __init__(self):
-        self.model_loaded = False
-        self.net = None
-        self.input_blob_name = None
-        self.output_blob_names = []
-        self.input_size = config.INPUT_SIZE
+class TrackedObject:
+    """
+    Represents a tracked bottle with accumulated detections
+    """
+    def __init__(self, object_id, x_center, y_center):
+        self.object_id = object_id
+        self.x_center = x_center
+        self.y_center = y_center
+        self.detected_classes = set()  # Accumulate class names
+        self.bbox = None
+        self.last_seen = time.time()
+        self.crossed = False
+        self.classification_result = None  # 'OK' or 'NG'
+        self.classification_reason = ""
+    
+    def update_position(self, x_center, y_center, bbox=None):
+        """Update object position"""
+        self.x_center = x_center
+        self.y_center = y_center
+        if bbox is not None:
+            self.bbox = bbox
+        self.last_seen = time.time()
+    
+    def add_detected_class(self, class_name):
+        """Add detected class to collection"""
+        self.detected_classes.add(class_name)
+    
+    def finalize_classification(self):
+        """
+        Finalize classification when crossing line
         
+        Rules (STRICT):
+        - If ANY defect detected → NG
+        - If ALL good classes (cap + label + filled) present AND NO defects → OK
+        - Otherwise → NG
+        """
+        # Check for defects
+        defect_classes = {'Cap-Defect', 'Filling-Defect', 'Label-Defect', 'Wrong-Product'}
+        detected_defects = self.detected_classes & defect_classes
+        
+        if detected_defects:
+            # ANY defect → NG
+            self.classification_result = 'NG'
+            self.classification_reason = f"Defect: {', '.join(detected_defects)}"
+            return
+        
+        # Check for all required good classes
+        required_good = {'cap', 'label', 'filled'}
+        has_all_good = required_good.issubset(self.detected_classes)
+        
+        if has_all_good:
+            # All good classes present, no defects → OK
+            self.classification_result = 'OK'
+            self.classification_reason = "All components OK"
+        else:
+            # Missing some good classes → NG
+            missing = required_good - self.detected_classes
+            self.classification_result = 'NG'
+            self.classification_reason = f"Missing: {', '.join(missing)}"
+
+
+class AIEngine:
+    """
+    AI Engine using YOLO for object detection and tracking
+    
+    Responsibilities:
+    - Run YOLO inference on frames
+    - Track bottles across frames
+    - Accumulate detected classes per bottle
+    - Detect line crossing (RIGHT → LEFT)
+    - Finalize classification when bottle crosses line
+    """
+    
+    def __init__(self):
+        print("[AI] Initializing YOLO model...")
+        
+        # Load YOLO model
+        try:
+            self.model = YOLO(config.MODEL_PATH_YOLO)
+            print(f"[AI] Model loaded: {config.MODEL_PATH_YOLO}")
+        except Exception as e:
+            print(f"[ERROR] Failed to load YOLO model: {e}")
+            raise
+        
+        # Configuration
         self.conf_threshold = config.CONFIDENCE_THRESHOLD
-        self.nms_threshold = config.NMS_THRESHOLD
         self.class_names = config.CLASS_NAMES
         self.num_classes = len(self.class_names)
         
-        if NCNN_AVAILABLE:
-            self._load_model()
-        else:
-            print("[ERROR] Cannot initialize AI engine without NCNN")
+        # Tracking
+        self.tracked_objects = {}  # {object_id: TrackedObject}
+        self.next_object_id = 0
+        self.max_distance = 100  # Max pixels for object matching
+        self.object_timeout = 3.0  # Remove objects not seen for 3 seconds
+        
+        # Line crossing
+        self.virtual_line_x = config.VIRTUAL_LINE_X
+        
+        print(f"[AI] Initialized with {self.num_classes} classes")
+        print(f"[AI] Virtual line at x={self.virtual_line_x}")
+        print(f"[AI] Class names: {self.class_names}")
     
-    def _load_model(self):
-        try:
-            param_path = os.path.join(config.MODEL_PATH, config.MODEL_PARAM)
-            bin_path = os.path.join(config.MODEL_PATH, config.MODEL_BIN)
-            
-            if not os.path.exists(param_path):
-                print(f"[ERROR] Model param file not found: {param_path}")
-                return
-            
-            if not os.path.exists(bin_path):
-                print(f"[ERROR] Model bin file not found: {bin_path}")
-                return
-            
-            self._detect_blob_names(param_path)
-            self._detect_input_size(param_path)
-            
-            self.net = ncnn.Net()
-            self.net.opt.use_vulkan_compute = False
-            self.net.opt.num_threads = 4
-            
-            ret_param = self.net.load_param(param_path)
-            if ret_param != 0:
-                print(f"[ERROR] Failed to load param file (code={ret_param})")
-                return
-            
-            ret_bin = self.net.load_model(bin_path)
-            if ret_bin != 0:
-                print(f"[ERROR] Failed to load bin file (code={ret_bin})")
-                return
-            
-            self.model_loaded = True
-            print(f"[AI] Model loaded successfully")
-            print(f"[AI] Input blob: {self.input_blob_name}, Output blobs: {self.output_blob_names}")
-            print(f"[AI] Input size: {self.input_size}x{self.input_size}")
-            
-        except Exception as e:
-            print(f"[ERROR] Exception loading model: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    def _detect_blob_names(self, param_path):
-        with open(param_path, 'r') as f:
-            lines = f.readlines()
+    def predict_and_track(self, frame):
+        """
+        Run YOLO detection and update tracking
         
-        for line in lines:
-            if line.startswith('Input'):
-                parts = line.split()
-                if len(parts) >= 3:
-                    self.input_blob_name = parts[2]
-                    break
-        
-        if not self.input_blob_name:
-            self.input_blob_name = 'in0'
-        
-        for line in lines:
-            if 'out0' in line or 'output0' in line:
-                if 'out0' in line:
-                    self.output_blob_names.append('out0')
-                if 'output0' in line:
-                    self.output_blob_names.append('output0')
-                break
-        
-        if not self.output_blob_names:
-            self.output_blob_names = ['out0']
-        
-        if 'output1' in ''.join(lines):
-            self.output_blob_names.append('output1')
-    
-    def _detect_input_size(self, param_path):
-        with open(param_path, 'r') as f:
-            content = f.read()
-        
-        match = re.search(r'Input.*?(\d+)\s+(\d+)', content)
-        if match:
-            w, h = int(match.group(1)), int(match.group(2))
-            if w == h:
-                self.input_size = w
-                return
-        
-        match = re.search(r'0=(\d+).*?1=(\d+)', content)
-        if match:
-            w, h = int(match.group(1)), int(match.group(2))
-            if w == h and w > 0:
-                self.input_size = w
-    
-    def predict(self, frame):
-        if not self.model_loaded:
-            return {
-                "detections": [],
-                "annotated_image": frame.copy(),
-                "result": "N",
-                "reason": "Model not loaded",
-                "processing_time_ms": 0
+        Returns:
+            dict: {
+                'detections': list of detection dicts,
+                'tracked_objects': dict of TrackedObject,
+                'crossed_objects': list of objects that just crossed line
             }
-        
-        start_time = time.time()
-        orig_h, orig_w = frame.shape[:2]
-        
-        mat_in = self._preprocess(frame)
-        detections_raw = self._run_inference(mat_in, orig_w, orig_h)
-        detections_filtered = self._apply_nms(detections_raw)
-        
-        result_dict = self._apply_sorting_logic(detections_filtered)
-        annotated = self._draw_detections(frame.copy(), detections_filtered)
-        
-        result_dict['annotated_image'] = annotated
-        result_dict['detections'] = [
-            {"cls": d['class_id'], "conf": d['confidence'], "box": d['bbox']}
-            for d in detections_filtered
-        ]
-        result_dict['processing_time_ms'] = (time.time() - start_time) * 1000
-        
-        return result_dict
-    
-    def _preprocess(self, frame):
-        resized = cv2.resize(frame, (self.input_size, self.input_size))
-        mat_in = ncnn.Mat.from_pixels(
-            resized,
-            ncnn.Mat.PixelType.PIXEL_BGR,
-            self.input_size,
-            self.input_size
+        """
+        # Run YOLO inference
+        results = self.model.predict(
+            frame,
+            conf=self.conf_threshold,
+            verbose=False
         )
-        mean_vals = [0, 0, 0]
-        norm_vals = [1/255.0, 1/255.0, 1/255.0]
-        mat_in.substract_mean_normalize(mean_vals, norm_vals)
-        return mat_in
-    
-    def _run_inference(self, mat_in, orig_w, orig_h):
-        try:
-            if config.DEBUG_MODE:
-                print(f"[AI] Inference: Starting...")
-            
-            ex = self.net.create_extractor()
-            ex.set_vulkan_compute(False)
-            
-            if config.DEBUG_MODE:
-                print(f"[AI] Inference: Input blob='{self.input_blob_name}'")
-            
-            ret_input = ex.input(self.input_blob_name, mat_in)
-            if ret_input != 0:
-                print(f"[ERROR] Input failed (code={ret_input})")
-                return []
-            
-            if config.DEBUG_MODE:
-                print(f"[AI] Inference: Input set successfully")
-            
-            all_detections = []
-            
-            for output_name in self.output_blob_names:
-                if config.DEBUG_MODE:
-                    print(f"[AI] Inference: Extracting output '{output_name}'...")
-                
-                ret, mat_out = ex.extract(output_name)
-                if ret != 0:
-                    if config.DEBUG_MODE:
-                        print(f"[AI] Inference: Extract '{output_name}' failed (code={ret})")
-                    continue
-                
-                if config.DEBUG_MODE:
-                    print(f"[AI] Inference: Extract '{output_name}' successful")
-                
-                detections = self._decode_yolo_output(mat_out, orig_w, orig_h)
-                all_detections.extend(detections)
-            
-            if not all_detections and self.output_blob_names:
-                if config.DEBUG_MODE:
-                    print(f"[AI] Inference: No detections, trying fallback...")
-                ret, mat_out = ex.extract(self.output_blob_names[0])
-                if ret == 0:
-                    all_detections = self._decode_yolo_output(mat_out, orig_w, orig_h)
-            
-            if config.DEBUG_MODE:
-                print(f"[AI] Inference: Total detections: {len(all_detections)}")
-            
-            return all_detections
-            
-        except Exception as e:
-            print(f"[ERROR] Inference failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
-    
-    def _decode_yolo_output(self, output, img_w, img_h):
+        
+        # Parse detections
         detections = []
-        
-        try:
-            out_np = np.array(output)
-            
-            if config.DEBUG_MODE:
-                print(f"[AI] Decode: Raw output shape={out_np.shape}, dtype={out_np.dtype}")
-            
-            if len(out_np.shape) == 3:
-                out_np = out_np[0]
-                if config.DEBUG_MODE:
-                    print(f"[AI] Decode: Removed batch dim, shape={out_np.shape}")
-            
-            if len(out_np.shape) == 2:
-                if out_np.shape[0] < out_np.shape[1]:
-                    out_np = out_np.T
-                    if config.DEBUG_MODE:
-                        print(f"[AI] Decode: Transposed, shape={out_np.shape}")
-            
-            if len(out_np.shape) != 2:
-                if config.DEBUG_MODE:
-                    print(f"[AI] Decode: ERROR - Unexpected shape {out_np.shape}")
-                return []
-            
-            num_anchors, num_features = out_np.shape
-            
-            if config.DEBUG_MODE:
-                print(f"[AI] Decode: Processing {num_anchors} anchors, {num_features} features")
-                print(f"[AI] Decode: Expected {4 + self.num_classes} features, got {num_features}")
-            
-            if num_features < 4 + self.num_classes:
-                if config.DEBUG_MODE:
-                    print(f"[AI] Decode: ERROR - Not enough features")
-                return []
-            
-            scale_x = img_w / self.input_size
-            scale_y = img_h / self.input_size
-            
-            if config.DEBUG_MODE:
-                print(f"[AI] Decode: Scale factors: x={scale_x:.3f}, y={scale_y:.3f}")
-                print(f"[AI] Decode: Confidence threshold: {self.conf_threshold}")
-            
-            valid_count = 0
-            filtered_count = 0
-            
-            for i in range(min(num_anchors, 1000)):  # Limit to first 1000 for performance
-                row = out_np[i]
-                
-                if len(row) < 4 + self.num_classes:
-                    continue
-                
-                x_center = float(row[0])
-                y_center = float(row[1])
-                width = float(row[2])
-                height = float(row[3])
-                
-                if width <= 0 or height <= 0:
-                    continue
-                
-                class_scores_raw = row[4:4+self.num_classes]
-                
-                if len(class_scores_raw) < self.num_classes:
-                    continue
-                
-                class_scores = class_scores_raw.copy()
-                max_val = np.max(class_scores)
-                min_val = np.min(class_scores)
-                
-                if config.DEBUG_MODE and valid_count < 3:
-                    print(f"[AI] Decode: Sample #{valid_count}: scores range=[{min_val:.3f}, {max_val:.3f}]")
-                
-                if max_val > 5.0 or min_val < -5.0:
-                    class_scores = 1.0 / (1.0 + np.exp(-np.clip(class_scores, -500, 500)))
-                    if config.DEBUG_MODE and valid_count < 3:
-                        print(f"[AI] Decode: Applied sigmoid (was logits)")
-                
-                class_id = int(np.argmax(class_scores))
-                confidence = float(np.clip(class_scores[class_id], 0.0, 1.0))
-                
-                if config.DEBUG_MODE and valid_count < 3:
-                    print(f"[AI] Decode: Best class: {self.class_names[class_id]} (id={class_id}), conf={confidence:.3f}")
-                
-                if confidence < self.conf_threshold:
-                    filtered_count += 1
-                    continue
-                
-                x_center_scaled = x_center * scale_x
-                y_center_scaled = y_center * scale_y
-                width_scaled = width * scale_x
-                height_scaled = height * scale_y
-                
-                x1 = int(x_center_scaled - width_scaled / 2)
-                y1 = int(y_center_scaled - height_scaled / 2)
-                x2 = int(x_center_scaled + width_scaled / 2)
-                y2 = int(y_center_scaled + height_scaled / 2)
-                
-                x1 = max(0, min(x1, img_w - 1))
-                y1 = max(0, min(y1, img_h - 1))
-                x2 = max(1, min(x2, img_w))
-                y2 = max(1, min(y2, img_h))
-                
-                if x2 > x1 and y2 > y1 and (x2 - x1) >= 5 and (y2 - y1) >= 5:
-                    detections.append({
-                        'class_id': class_id,
-                        'class_name': self.class_names[class_id],
-                        'confidence': confidence,
-                        'bbox': [x1, y1, x2, y2]
-                    })
+        if len(results) > 0:
+            result = results[0]
+            if result.boxes is not None:
+                for box in result.boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    confidence = float(box.conf[0].cpu().numpy())
+                    class_id = int(box.cls[0].cpu().numpy())
                     
-                    if config.DEBUG_MODE:
-                        print(f"[AI] Decode: ✅ Detection: {self.class_names[class_id]} ({confidence:.2f}) at [{x1}, {y1}, {x2}, {y2}]")
-                
-                valid_count += 1
-            
-            if config.DEBUG_MODE:
-                print(f"[AI] Decode: Total valid: {valid_count}, Filtered by threshold: {filtered_count}, Final detections: {len(detections)}")
+                    if class_id < len(self.class_names):
+                        class_name = self.class_names[class_id]
+                        
+                        detections.append({
+                            'bbox': [int(x1), int(y1), int(x2), int(y2)],
+                            'confidence': confidence,
+                            'class_id': class_id,
+                            'class_name': class_name
+                        })
         
-        except Exception as e:
-            print(f"[ERROR] Decode failed: {e}")
-            import traceback
-            traceback.print_exc()
+        # Update tracking and check for line crossing
+        crossed_objects = self._update_tracking(detections)
         
-        return detections
+        return {
+            'detections': detections,
+            'tracked_objects': self.tracked_objects,
+            'crossed_objects': crossed_objects
+        }
     
-    def _apply_nms(self, detections):
+    def _update_tracking(self, detections):
+        """
+        Update object tracking with new detections
+        
+        Returns:
+            list: Objects that just crossed the line
+        """
+        current_time = time.time()
+        crossed_objects = []
+        
+        # Remove old tracked objects
+        self.tracked_objects = {
+            obj_id: obj for obj_id, obj in self.tracked_objects.items()
+            if current_time - obj.last_seen < self.object_timeout
+        }
+        
+        # Group detections by position (multiple classes can detect same bottle)
+        detection_groups = self._group_detections_by_position(detections)
+        
+        # Match detection groups to tracked objects
+        matched_detections = set()
+        
+        for obj_id, tracked_obj in list(self.tracked_objects.items()):
+            if tracked_obj.crossed:
+                continue  # Skip already crossed objects
+            
+            # Find closest detection group
+            best_match = None
+            min_distance = self.max_distance
+            
+            for i, group in enumerate(detection_groups):
+                if i in matched_detections:
+                    continue
+                
+                group_center = group['center']
+                distance = np.sqrt(
+                    (group_center[0] - tracked_obj.x_center)**2 +
+                    (group_center[1] - tracked_obj.y_center)**2
+                )
+                
+                if distance < min_distance:
+                    min_distance = distance
+                    best_match = i
+            
+            if best_match is not None:
+                matched_detections.add(best_match)
+                group = detection_groups[best_match]
+                
+                # Store previous x position for crossing detection
+                prev_x = tracked_obj.x_center
+                
+                # Update tracked object
+                tracked_obj.update_position(
+                    group['center'][0],
+                    group['center'][1],
+                    group['bbox']
+                )
+                
+                # Add all detected classes from this group
+                for det in group['detections']:
+                    tracked_obj.add_detected_class(det['class_name'])
+                
+                # Check for line crossing (RIGHT → LEFT)
+                if not tracked_obj.crossed:
+                    if prev_x > self.virtual_line_x and tracked_obj.x_center <= self.virtual_line_x:
+                        # Object crossed from RIGHT to LEFT!
+                        tracked_obj.crossed = True
+                        tracked_obj.finalize_classification()
+                        crossed_objects.append(tracked_obj)
+                        
+                        print(f"[AI] Object #{obj_id} CROSSED LINE!")
+                        print(f"  Position: {prev_x} → {tracked_obj.x_center}")
+                        print(f"  Detected classes: {tracked_obj.detected_classes}")
+                        print(f"  Classification: {tracked_obj.classification_result}")
+                        print(f"  Reason: {tracked_obj.classification_reason}")
+        
+        # Create new tracked objects for unmatched detections
+        for i, group in enumerate(detection_groups):
+            if i not in matched_detections:
+                # Only track objects on the RIGHT side of line (before crossing)
+                if group['center'][0] > self.virtual_line_x:
+                    new_obj = TrackedObject(
+                        self.next_object_id,
+                        group['center'][0],
+                        group['center'][1]
+                    )
+                    new_obj.bbox = group['bbox']
+                    
+                    # Add all detected classes
+                    for det in group['detections']:
+                        new_obj.add_detected_class(det['class_name'])
+                    
+                    self.tracked_objects[self.next_object_id] = new_obj
+                    print(f"[AI] New object #{self.next_object_id} tracked at ({group['center'][0]}, {group['center'][1]})")
+                    self.next_object_id += 1
+        
+        return crossed_objects
+    
+    def _group_detections_by_position(self, detections):
+        """
+        Group detections that are close together (same bottle with multiple labels)
+        """
         if len(detections) == 0:
             return []
         
-        boxes = []
-        confidences = []
-        class_ids = []
+        groups = []
+        used = set()
         
-        for det in detections:
-            x1, y1, x2, y2 = det['bbox']
-            boxes.append([x1, y1, x2 - x1, y2 - y1])
-            confidences.append(det['confidence'])
-            class_ids.append(det['class_id'])
-        
-        indices = cv2.dnn.NMSBoxes(
-            boxes,
-            confidences,
-            self.conf_threshold,
-            self.nms_threshold
-        )
-        
-        filtered = []
-        if len(indices) > 0:
-            for i in indices.flatten():
-                filtered.append(detections[i])
-        
-        return filtered
-    
-    def _apply_sorting_logic(self, detections):
-        result = {
-            'result': 'O',
-            'reason': 'Sản phẩm đạt chuẩn',
-            'has_defects': False,
-            'defects_found': [],
-            'has_cap': False,
-            'has_filled': False,
-            'has_label': False
-        }
-        
-        for det in detections:
-            class_id = det['class_id']
+        for i, det1 in enumerate(detections):
+            if i in used:
+                continue
             
-            if class_id < 4:
-                result['has_defects'] = True
-                result['defects_found'].append(self.class_names[class_id])
-            elif class_id == 4:
-                result['has_cap'] = True
-            elif class_id == 6:
-                result['has_filled'] = True
-            elif class_id == 7:
-                result['has_label'] = True
-        
-        if result['has_defects']:
-            result['result'] = 'N'
-            result['reason'] = f"Phát hiện lỗi: {', '.join(result['defects_found'])}"
-        elif not result['has_cap']:
-            result['result'] = 'N'
-            result['reason'] = "Thiếu nắp"
-        elif not result['has_filled']:
-            result['result'] = 'N'
-            result['reason'] = "Thiếu chất lỏng"
-        elif not result['has_label']:
-            result['result'] = 'N'
-            result['reason'] = "Thiếu nhãn"
-        
-        return result
-    
-    def _draw_detections(self, frame, detections):
-        for det in detections:
-            x1, y1, x2, y2 = det['bbox']
-            class_name = det['class_name']
-            confidence = det['confidence']
-            class_id = det['class_id']
+            # Start new group
+            x1, y1, x2, y2 = det1['bbox']
+            cx1 = (x1 + x2) / 2
+            cy1 = (y1 + y2) / 2
             
-            if class_id < 4:
-                color = (0, 0, 255)
+            group_detections = [det1]
+            group_boxes = [[x1, y1, x2, y2]]
+            used.add(i)
+            
+            # Find nearby detections
+            for j, det2 in enumerate(detections):
+                if j in used:
+                    continue
+                
+                x1_2, y1_2, x2_2, y2_2 = det2['bbox']
+                cx2 = (x1_2 + x2_2) / 2
+                cy2 = (y1_2 + y2_2) / 2
+                
+                # Check if centers are close
+                distance = np.sqrt((cx1 - cx2)**2 + (cy1 - cy2)**2)
+                if distance < 100:  # Within 100 pixels = same bottle
+                    group_detections.append(det2)
+                    group_boxes.append([x1_2, y1_2, x2_2, y2_2])
+                    used.add(j)
+            
+            # Compute group bounding box (union of all boxes)
+            all_x1 = [box[0] for box in group_boxes]
+            all_y1 = [box[1] for box in group_boxes]
+            all_x2 = [box[2] for box in group_boxes]
+            all_y2 = [box[3] for box in group_boxes]
+            
+            group_bbox = [
+                int(min(all_x1)),
+                int(min(all_y1)),
+                int(max(all_x2)),
+                int(max(all_y2))
+            ]
+            
+            group_center = [
+                (group_bbox[0] + group_bbox[2]) / 2,
+                (group_bbox[1] + group_bbox[3]) / 2
+            ]
+            
+            groups.append({
+                'detections': group_detections,
+                'bbox': group_bbox,
+                'center': group_center
+            })
+        
+        return groups
+    
+    def draw_tracking(self, frame, tracked_objects_dict):
+        """
+        Draw tracking visualization on frame
+        """
+        for obj_id, obj in tracked_objects_dict.items():
+            if obj.bbox is None:
+                continue
+            
+            x1, y1, x2, y2 = obj.bbox
+            
+            # Color based on state
+            if obj.crossed:
+                if obj.classification_result == 'OK':
+                    color = (0, 255, 0)  # Green for OK
+                else:
+                    color = (0, 0, 255)  # Red for NG
             else:
-                color = (0, 255, 0)
+                color = (255, 255, 0)  # Yellow for tracking
             
+            # Draw bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             
-            label = f"{class_name}: {confidence:.2f}"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
-            cv2.rectangle(frame, (x1, y1 - th - 4), (x1 + tw, y1), color, -1)
-            cv2.putText(frame, label, (x1, y1 - 2), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+            # Draw object ID and center
+            cv2.circle(frame, (int(obj.x_center), int(obj.y_center)), 5, color, -1)
+            cv2.putText(
+                frame,
+                f"ID:{obj_id}",
+                (x1, y1 - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                color,
+                2
+            )
+            
+            # Draw detected classes
+            classes_text = ", ".join(list(obj.detected_classes)[:3])  # Show first 3
+            cv2.putText(
+                frame,
+                classes_text,
+                (x1, y2 + 20),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                color,
+                1
+            )
+            
+            # Draw classification result if crossed
+            if obj.crossed:
+                cv2.putText(
+                    frame,
+                    f"{obj.classification_result}: {obj.classification_reason}",
+                    (x1, y1 - 30),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.6,
+                    color,
+                    2
+                )
         
         return frame

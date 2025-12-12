@@ -1,51 +1,98 @@
 # ============================================
 # COCA-COLA SORTING SYSTEM - CONFIGURATION
-# FIFO Queue Logic with Virtual Line Detection
 # ============================================
+"""
+Configuration for Coca-Cola Bottle Sorting System
+
+IMPORTANT:
+- Conveyor direction: RIGHT → LEFT
+- Line crossing: bottle moves from right to left
+- Classification finalizes at line crossing
+- Model: YOLO best.pt (NCNN will replace later)
+"""
 
 # ============================================
-# AI MODEL SETTINGS (NCNN)
+# AI MODEL SETTINGS
 # ============================================
-MODEL_PATH = "model/best_ncnn_model"  # Updated to match actual folder
-MODEL_PARAM = "model.ncnn.param"       # Actual filename
-MODEL_BIN = "model.ncnn.bin"           # Actual filename
-INPUT_SIZE = 640
+# Current model: YOLO (for testing and integration)
+# Future: NCNN (will replace without changing logic)
+MODEL_PATH_YOLO = "model/best.pt"
 
 # Detection Thresholds
-CONFIDENCE_THRESHOLD = 0.3  # Reduced for better detection (was 0.5)
-NMS_THRESHOLD = 0.45
+CONFIDENCE_THRESHOLD = 0.25  # Confidence threshold for detection
+NMS_THRESHOLD = 0.45         # Non-max suppression threshold
 
-# Class Names (8 classes)
+# Class Names (STRICT ORDER - DO NOT CHANGE)
+# These are the EXACT class names output by the AI model
 CLASS_NAMES = [
-    'Cap-Defect',      # 0
-    'Filling-Defect',  # 1
-    'Label-Defect',    # 2
-    'Wrong-Product',   # 3
-    'cap',             # 4
-    'coca',            # 5
-    'filled',          # 6
-    'label'            # 7
+    'Cap-Defect',      # 0 - Defect
+    'Filling-Defect',  # 1 - Defect
+    'Label-Defect',    # 2 - Defect
+    'Wrong-Product',   # 3 - Defect
+    'cap',             # 4 - Good component
+    'coca',            # 5 - Identity (NOT used for OK/NG classification)
+    'filled',          # 6 - Good component
+    'label'            # 7 - Good component
 ]
 
 # ============================================
-# SORTING LOGIC
+# CLASSIFICATION LOGIC (CRITICAL)
 # ============================================
-# Defect classes (0-3)
-DEFECT_CLASSES = [0, 1, 2, 3]
+"""
+Classification Rules (STRICT):
 
-# Required good components
-REQUIRED_COMPONENTS = {
-    'cap': 4,
-    'filled': 6,
-    'label': 7
-}
+1. DEFECT CLASSES (indices 0-3):
+   - Cap-Defect
+   - Filling-Defect
+   - Label-Defect
+   - Wrong-Product
+   
+   → If ANY defect detected → Result = NG
+
+2. GOOD CLASSES (indices 4, 6, 7):
+   - cap
+   - filled
+   - label
+   
+   → If ALL three present AND NO defects → Result = OK
+   → If ANY missing → Result = NG
+
+3. IDENTITY CLASS (index 5):
+   - coca
+   
+   → Used ONLY to confirm product identity
+   → MUST NOT be used alone for OK/NG classification
+
+4. IMPORTANT:
+   - DO NOT use confidence score for classification
+   - Classification based ONLY on detected labels
+   - Classification finalizes ONLY when bottle crosses line
+"""
+
+DEFECT_CLASS_IDS = [0, 1, 2, 3]
+GOOD_CLASS_IDS = [4, 6, 7]
+IDENTITY_CLASS_ID = 5
 
 # ============================================
-# VIRTUAL LINE DETECTION
+# LINE CROSSING (SOFTWARE SENSOR)
 # ============================================
-VIRTUAL_LINE_X = 320  # Pixel position (center of 640px frame)
-CROSSING_TOLERANCE = 40  # Pixels tolerance for crossing detection (increased for better detection)
-DETECTION_COOLDOWN = 0.8  # Seconds between detections (reduced for faster processing)
+"""
+Virtual Line Detection:
+
+- Virtual vertical line at x = VIRTUAL_LINE_X
+- Bottles move from RIGHT → LEFT
+- Crossing condition:
+  - Previous x > VIRTUAL_LINE_X
+  - Current x <= VIRTUAL_LINE_X
+  
+- When crossing:
+  1. Finalize classification (OK / NG)
+  2. Lock result (no further changes)
+  3. Send to Arduino: 'O' = OK, 'N' = NG
+"""
+
+VIRTUAL_LINE_X = 320  # X coordinate of virtual line (center of 640px frame)
+CROSSING_TOLERANCE = 10  # Tolerance in pixels
 
 # ============================================
 # CAMERA SETTINGS
@@ -55,36 +102,71 @@ CAMERA_WIDTH = 640
 CAMERA_HEIGHT = 480
 CAMERA_FPS = 30
 
-# Manual exposure (reduce motion blur)
+# Exposure settings (reduce motion blur)
 CAMERA_AUTO_EXPOSURE = False
 CAMERA_EXPOSURE = -6
 
 # ============================================
 # ARDUINO COMMUNICATION
 # ============================================
-ARDUINO_PORT = '/dev/ttyUSB0'  # Arduino Uno CH340 (chip dán) - Change if needed
-# Common alternatives: /dev/ttyACM0, /dev/ttyUSB1
-# Check with: ls /dev/ttyUSB* or ls /dev/ttyACM*
+"""
+Serial Protocol:
+
+Raspberry Pi → Arduino:
+- 'O' = OK product (allow to pass)
+- 'N' = NG product (block with servo)
+- 'S' = Start conveyor
+- 'P' = Pause/Stop conveyor
+
+Arduino → Raspberry Pi:
+- 'T' = IR sensor triggered (bottle detected)
+"""
+
+ARDUINO_PORT = '/dev/ttyUSB0'  # Change as needed
+# Common: /dev/ttyACM0, /dev/ttyUSB0, /dev/ttyUSB1
 ARDUINO_BAUDRATE = 9600
-ARDUINO_TIMEOUT = 1
+ARDUINO_TIMEOUT = 1.0
 
 # Serial Commands
-CMD_TRIGGER = 'T'  # IR Sensor detected bottle
-CMD_KICK = 'K'     # Command to kick NG bottle
-CMD_OK = 'O'       # OK bottle (optional, for logging)
+CMD_OK = 'O'       # OK product
+CMD_NG = 'N'       # NG product
+CMD_START = 'S'    # Start conveyor
+CMD_STOP = 'P'     # Stop conveyor
+CMD_TRIGGER = 'T'  # IR trigger (from Arduino)
 
 # ============================================
-# UI SETTINGS
+# HARDWARE PINS (Arduino)
 # ============================================
-WINDOW_WIDTH = 1200
-WINDOW_HEIGHT = 700
+"""
+Arduino Pin Configuration:
 
-# Virtual Line Color (Cyan)
-LINE_COLOR = (0, 255, 255)
+Digital Pins:
+- Pin 2: IR Sensor (INPUT_PULLUP)
+- Pin 4: Relay (OUTPUT) - Conveyor control
+- Pin 9: Servo (OUTPUT) - Bottle blocking
+
+Relay Logic:
+- LOW = Relay ON = Conveyor Running
+- HIGH = Relay OFF = Conveyor Stopped
+"""
+
+PIN_IR_SENSOR = 2
+PIN_RELAY = 4
+PIN_SERVO = 9
+
+# Servo positions
+SERVO_IDLE = 0     # Allow bottle to pass
+SERVO_BLOCK = 100  # Block NG bottle
+
+# ============================================
+# UI SETTINGS (TKINTER)
+# ============================================
+WINDOW_WIDTH = 1400
+WINDOW_HEIGHT = 800
+
+# Virtual Line Visualization
+LINE_COLOR = (0, 255, 255)  # Cyan
 LINE_THICKNESS = 3
-
-# Queue Display
-MAX_QUEUE_DISPLAY = 10  # Show last N items in queue
 
 # ============================================
 # DATABASE SETTINGS
@@ -99,21 +181,46 @@ CAPTURE_NG_PATH = "captures/ng"
 SAVE_SNAPSHOTS = True
 
 # ============================================
+# SYSTEM SETTINGS
+# ============================================
+# Detection cooldown (prevent multiple detections of same bottle)
+DETECTION_COOLDOWN = 1.0  # seconds
+
+# Object tracking
+MAX_TRACKING_DISTANCE = 100  # pixels
+OBJECT_TIMEOUT = 3.0  # seconds
+
+# ============================================
 # DEBUG SETTINGS
 # ============================================
-DEBUG_MODE = True  # Show detailed debug info
-SAVE_DEBUG_IMAGES = True  # Save annotated images
-
-# Print verbose logs
-VERBOSE_LOGGING = True  # Print processing logs
+DEBUG_MODE = True
+VERBOSE_LOGGING = True
 
 # ============================================
-# TESTING MODE (Dummy Hardware)
+# TESTING MODE
 # ============================================
-USE_DUMMY_CAMERA = False   # Set True to test UI without camera
-USE_DUMMY_HARDWARE = False # Set True to test without Arduino
+"""
+Dummy Mode for Testing:
+
+- USE_DUMMY_CAMERA: Test UI without physical camera
+- USE_DUMMY_HARDWARE: Test without Arduino
+
+For PRODUCTION: Set both to False
+"""
+
+USE_DUMMY_CAMERA = False
+USE_DUMMY_HARDWARE = False
 
 # ============================================
-# NOTE: For production, set both to False!
+# SYSTEM INFORMATION
 # ============================================
+SYSTEM_NAME = "Coca-Cola Bottle Sorting System"
+VERSION = "1.0.0"
+MODE = "Line Crossing with YOLO"
 
+print(f"[Config] {SYSTEM_NAME} v{VERSION}")
+print(f"[Config] Mode: {MODE}")
+print(f"[Config] Model: {MODEL_PATH_YOLO}")
+print(f"[Config] Classes: {len(CLASS_NAMES)}")
+print(f"[Config] Virtual Line: x={VIRTUAL_LINE_X}")
+print(f"[Config] Conveyor Direction: RIGHT → LEFT")

@@ -1,0 +1,41 @@
+# ============================================
+# Python Dependencies
+# Coca-Cola Bottle Sorting System
+# ============================================
+
+# Core AI and Computer Vision
+ultralytics>=8.0.0          # YOLO model (current)
+opencv-python>=4.8.0        # Computer vision
+numpy>=1.24.0               # Numerical operations
+
+# Image Processing
+Pillow>=10.0.0              # Image handling for Tkinter
+
+# Hardware Communication
+pyserial>=3.5               # Serial communication with Arduino
+
+# Database
+# sqlite3 is built into Python, no need to install
+
+# GUI (Tkinter)
+# tkinter is built into Python on most systems
+# On Raspberry Pi OS, if needed: sudo apt-get install python3-tk
+
+# Optional: For better performance
+# torch>=2.0.0              # PyTorch (if using GPU)
+# torchvision>=0.15.0
+
+# ============================================
+# Installation Instructions
+# ============================================
+# 
+# Install all dependencies:
+#   pip3 install -r requirements.txt
+# 
+# For Raspberry Pi 5:
+#   sudo apt-get update
+#   sudo apt-get install python3-opencv python3-serial python3-pil python3-tk
+#   pip3 install ultralytics
+# 
+# ============================================
+
