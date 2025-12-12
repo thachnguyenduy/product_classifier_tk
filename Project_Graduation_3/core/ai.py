@@ -124,8 +124,9 @@ class AIEngine:
         
         # NCNN network
         self.net = None
-        self.input_blob_name = "in0"
-        self.output_blob_name = "out0"
+        # Fixed blob names from param file (line 3 and 204)
+        self.input_blob_name = "in0"   # Input blob
+        self.output_blob_name = "out0"  # Output blob
         
         # Load model
         self._load_ncnn_model()
@@ -152,15 +153,13 @@ class AIEngine:
             if not os.path.exists(self.bin_file):
                 raise FileNotFoundError(f"Bin file not found: {self.bin_file}")
             
-            # Auto-detect input blob name
-            self._detect_blob_names()
-            
             # Create NCNN network
             self.net = ncnn.Net()
             self.net.opt.use_vulkan_compute = False  # Disable Vulkan for stability
             self.net.opt.num_threads = 4  # Use 4 threads on Pi 5
+            self.net.opt.use_fp16_storage = False  # Use FP32
             
-            # Load model
+            # Load model files
             ret_param = self.net.load_param(self.param_file)
             if ret_param != 0:
                 raise RuntimeError(f"Failed to load param file (code={ret_param})")
@@ -169,10 +168,14 @@ class AIEngine:
             if ret_bin != 0:
                 raise RuntimeError(f"Failed to load bin file (code={ret_bin})")
             
-            print(f"[AI] NCNN loaded: {self.input_blob_name} -> {self.output_blob_name}")
+            print(f"[AI] NCNN model loaded successfully")
+            print(f"[AI] Input blob: '{self.input_blob_name}'")
+            print(f"[AI] Output blob: '{self.output_blob_name}'")
             
         except Exception as e:
             print(f"[ERROR] Failed to load NCNN model: {e}")
+            import traceback
+            traceback.print_exc()
             raise
     
     def _detect_blob_names(self):
