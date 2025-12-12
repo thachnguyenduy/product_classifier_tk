@@ -151,8 +151,8 @@ SKIP_FRAMES = 0  # 0 = process all frames, 1 = skip every other frame
 # ============================================
 # DEBUG SETTINGS
 # ============================================
-DEBUG_MODE = False  # Set False for production (better performance)
-VERBOSE_LOGGING = False  # Set False to reduce console output
+DEBUG_MODE = True  # Set True for debugging, False for production
+VERBOSE_LOGGING = True  # Set True to see detailed logs
 
 # ============================================
 # TESTING MODE
