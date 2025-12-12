@@ -109,15 +109,15 @@ WINDOW_WIDTH = 1200
 WINDOW_HEIGHT = 700
 
 # Video display size (reduce for better performance)
-VIDEO_DISPLAY_WIDTH = 800   # Reduced from 900
-VIDEO_DISPLAY_HEIGHT = 600  # Scaled proportionally
+VIDEO_DISPLAY_WIDTH = 640   # Giảm để tăng FPS
+VIDEO_DISPLAY_HEIGHT = 480  # Scaled proportionally
 
 # Virtual Line Color
 LINE_COLOR = (0, 255, 255)  # Cyan
-LINE_THICKNESS = 3
+LINE_THICKNESS = 2  # Mỏng hơn để vẽ nhanh hơn
 
 # UI Update Rate (optimized)
-UI_UPDATE_INTERVAL = 33  # ms (30 FPS)
+UI_UPDATE_INTERVAL = 40  # ms (~25 FPS, smooth enough)
 
 # ============================================
 # DATABASE SETTINGS
@@ -137,9 +137,9 @@ SAVE_SNAPSHOTS = True
 # Detection cooldown (prevent overload)
 DETECTION_COOLDOWN = 0.8  # seconds
 
-# Object tracking
-MAX_TRACKING_DISTANCE = 100  # pixels
-OBJECT_TIMEOUT = 3.0  # seconds
+# Object tracking (simplified)
+MAX_TRACKING_DISTANCE = 150  # pixels (tăng để match dễ hơn, nhanh hơn)
+OBJECT_TIMEOUT = 2.0  # seconds (giảm để cleanup nhanh hơn)
 
 # Thread settings (optimized for Pi 5)
 NCNN_NUM_THREADS = 4  # Pi 5 has 4 cores
@@ -151,8 +151,8 @@ SKIP_FRAMES = 0  # 0 = process all frames, 1 = skip every other frame
 # ============================================
 # DEBUG SETTINGS
 # ============================================
-DEBUG_MODE = True  # Set True for debugging, False for production
-VERBOSE_LOGGING = True  # Set True to see detailed logs
+DEBUG_MODE = False  # Set False for better performance
+VERBOSE_LOGGING = False  # Set False to reduce lag
 
 # ============================================
 # TESTING MODE

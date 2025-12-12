@@ -233,14 +233,11 @@ class MainWindow:
                     # Run AI detection and tracking
                     result = self.ai.predict_and_track(frame)
                     
-                    # VẼ TẤT CẢ RAW DETECTIONS (để thấy model detect được gì)
+                    # VẼ DETECTIONS ĐƠN GIẢN (không vẽ tracking boxes phức tạp)
                     if 'detections' in result and len(result['detections']) > 0:
-                        self._draw_raw_detections(frame, result['detections'])
+                        self._draw_simple_detections(frame, result['detections'])
                     
-                    # Draw tracking visualization (boxes lớn, đã group)
-                    frame = self.ai.draw_tracking(frame, result['tracked_objects'])
-                    
-                    # Handle crossed objects
+                    # Handle crossed objects (đơn giản)
                     for crossed_obj in result['crossed_objects']:
                         self._on_bottle_crossed_line(crossed_obj, frame)
                 
@@ -315,10 +312,10 @@ class MainWindow:
             1
         )
     
-    def _draw_raw_detections(self, frame, detections):
+    def _draw_simple_detections(self, frame, detections):
         """
-        Vẽ TẤT CẢ raw detections từ model (trước khi tracking/grouping)
-        Để user thấy model đang detect được những gì
+        Vẽ detections ĐƠN GIẢN - CHỈ BOX VÀ LABEL
+        Tối ưu cho performance (không vẽ quá nhiều)
         """
         for det in detections:
             x1, y1, x2, y2 = det['bbox']
@@ -332,24 +329,18 @@ class MainWindow:
             else:  # Good classes
                 color = (0, 255, 0)  # Green
             
-            # Vẽ box mỏng (khác với tracking box dày)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
+            # Vẽ box (đơn giản)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             
-            # Vẽ label với background
+            # Label ngắn gọn
             label = f"{class_name}: {confidence:.2f}"
-            (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)
-            
-            # Background cho text
-            cv2.rectangle(frame, (x1, y1 - th - 4), (x1 + tw, y1), color, -1)
-            
-            # Text
             cv2.putText(
                 frame,
                 label,
-                (x1, y1 - 2),
+                (x1, y1 - 5),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.4,
-                (255, 255, 255),
+                0.5,
+                color,
                 1
             )
     

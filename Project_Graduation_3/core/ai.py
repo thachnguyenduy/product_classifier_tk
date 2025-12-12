@@ -202,25 +202,19 @@ class AIEngine:
     
     def predict_and_track(self, frame):
         """
-        Run NCNN detection and tracking (OPTIMIZED)
+        Run NCNN detection and tracking (SIMPLIFIED FOR SPEED)
         
         Returns:
             dict with detections, tracked_objects, crossed_objects
         """
-        start_time = time.time()
-        
-        # Preprocess
+        # Preprocess (nhanh)
         mat_in = self._preprocess(frame)
         
-        # Run inference
+        # Run inference (nhanh nhất)
         detections = self._run_inference(mat_in, frame.shape[1], frame.shape[0])
         
-        # Update tracking
+        # Update tracking (đơn giản hơn)
         crossed_objects = self._update_tracking(detections)
-        
-        if config.DEBUG_MODE:
-            inference_time = (time.time() - start_time) * 1000
-            print(f"[AI] Inference: {inference_time:.1f}ms | Detections: {len(detections)}")
         
         return {
             'detections': detections,
@@ -385,21 +379,20 @@ class AIEngine:
 
     
     def _apply_nms(self, detections):
-        """Apply NMS (OPTIMIZED)"""
-        if len(detections) == 0:
-            return []
+        """Apply NMS (OPTIMIZED - SIMPLIFIED)"""
+        if len(detections) <= 1:
+            return detections
         
+        # Chỉ apply NMS nếu có nhiều detections (tăng tốc)
         boxes = []
         confidences = []
-        class_ids = []
         
         for det in detections:
             x1, y1, x2, y2 = det['bbox']
             boxes.append([x1, y1, x2 - x1, y2 - y1])
             confidences.append(det['confidence'])
-            class_ids.append(det['class_id'])
         
-        # OpenCV NMS (very fast)
+        # OpenCV NMS (fast)
         indices = cv2.dnn.NMSBoxes(
             boxes,
             confidences,
@@ -407,12 +400,10 @@ class AIEngine:
             self.nms_threshold
         )
         
-        filtered = []
         if len(indices) > 0:
-            for i in indices.flatten():
-                filtered.append(detections[i])
+            return [detections[i] for i in indices.flatten()]
         
-        return filtered
+        return []
     
     def _update_tracking(self, detections):
         """Update tracking (OPTIMIZED)"""
