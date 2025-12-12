@@ -1,12 +1,16 @@
 # ============================================
-# Python Dependencies
-# Coca-Cola Bottle Sorting System
+# Python Dependencies - Raspberry Pi 5 Optimized
+# Coca-Cola Bottle Sorting System v2.0
 # ============================================
 
-# Core AI and Computer Vision
-ultralytics>=8.0.0          # YOLO model (current)
+# Core Computer Vision (optimized versions)
 opencv-python>=4.8.0        # Computer vision
 numpy>=1.24.0               # Numerical operations
+
+# NCNN for fast inference on Raspberry Pi
+# NOTE: Install ncnn separately on Raspberry Pi:
+#   pip3 install ncnn
+# Or build from source for best performance
 
 # Image Processing
 Pillow>=10.0.0              # Image handling for Tkinter
@@ -15,27 +19,48 @@ Pillow>=10.0.0              # Image handling for Tkinter
 pyserial>=3.5               # Serial communication with Arduino
 
 # Database
-# sqlite3 is built into Python, no need to install
+# sqlite3 is built into Python
 
-# GUI (Tkinter)
-# tkinter is built into Python on most systems
-# On Raspberry Pi OS, if needed: sudo apt-get install python3-tk
-
-# Optional: For better performance
-# torch>=2.0.0              # PyTorch (if using GPU)
-# torchvision>=0.15.0
+# GUI
+# tkinter is built into Python on Raspberry Pi OS
+# If needed: sudo apt-get install python3-tk
 
 # ============================================
-# Installation Instructions
+# Raspberry Pi 5 Installation Instructions
 # ============================================
 # 
-# Install all dependencies:
+# STEP 1: System dependencies
+#   sudo apt-get update
+#   sudo apt-get install -y python3-opencv python3-serial python3-pil python3-tk
+#   sudo apt-get install -y python3-numpy
+# 
+# STEP 2: Install NCNN
+#   pip3 install ncnn
+#   
+#   If pip install fails, build from source:
+#   git clone https://github.com/Tencent/ncnn.git
+#   cd ncnn
+#   mkdir build && cd build
+#   cmake -DCMAKE_BUILD_TYPE=Release -DNCNN_VULKAN=OFF -DNCNN_PYTHON=ON ..
+#   make -j4
+#   sudo make install
+# 
+# STEP 3: Install Python packages
 #   pip3 install -r requirements.txt
 # 
-# For Raspberry Pi 5:
-#   sudo apt-get update
-#   sudo apt-get install python3-opencv python3-serial python3-pil python3-tk
-#   pip3 install ultralytics
+# STEP 4: Verify installation
+#   python3 -c "import ncnn; print('NCNN OK')"
+#   python3 -c "import cv2; print('OpenCV OK')"
 # 
 # ============================================
-
+# Performance Tips for Raspberry Pi 5
+# ============================================
+# 
+# 1. Use V4L2 camera backend (auto-configured in camera.py)
+# 2. Disable DEBUG_MODE in config.py for production
+# 3. Use resolution 640x480 for best speed/quality balance
+# 4. Enable 4 threads for NCNN (configured in ai.py)
+# 5. Consider overclocking Pi 5 for even better performance
+# 6. Use good quality power supply (5V 5A recommended)
+# 
+# ============================================

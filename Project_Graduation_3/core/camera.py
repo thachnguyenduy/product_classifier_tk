@@ -1,5 +1,6 @@
 # ============================================
 # CAMERA MODULE - Threaded Video Capture
+# OPTIMIZED FOR RASPBERRY PI 5
 # ============================================
 
 import cv2
@@ -11,7 +12,12 @@ import config
 
 class Camera:
     """
-    Threaded camera capture for smooth video streaming
+    Threaded camera capture optimized for Raspberry Pi 5
+    
+    Optimizations:
+    - Non-blocking frame capture
+    - Buffer management
+    - Reduced memory allocations
     """
     
     def __init__(self):
@@ -28,25 +34,37 @@ class Camera:
         self._open_camera()
     
     def _open_camera(self):
-        """Open and configure camera"""
+        """Open and configure camera (OPTIMIZED)"""
         try:
-            self.cap = cv2.VideoCapture(self.camera_id)
+            # Use V4L2 backend for better performance on Pi
+            self.cap = cv2.VideoCapture(self.camera_id, cv2.CAP_V4L2)
+            
+            if not self.cap.isOpened():
+                print(f"[WARNING] V4L2 failed, trying default backend")
+                self.cap = cv2.VideoCapture(self.camera_id)
             
             if not self.cap.isOpened():
                 print(f"[ERROR] Cannot open camera {self.camera_id}")
                 return False
             
-            # Configure
+            # Configure (optimized settings)
             self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.width)
             self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, self.height)
             self.cap.set(cv2.CAP_PROP_FPS, config.CAMERA_FPS)
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer lag
             
             # Manual exposure (reduce motion blur)
             if not config.CAMERA_AUTO_EXPOSURE:
                 self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 1)  # Manual
                 self.cap.set(cv2.CAP_PROP_EXPOSURE, config.CAMERA_EXPOSURE)
             
-            print(f"[Camera] Opened successfully (ID: {self.camera_id}, {self.width}x{self.height})")
+            # MJPEG format for better FPS (if supported)
+            self.cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*'MJPG'))
+            
+            print(f"[Camera] Opened successfully")
+            print(f"[Camera] ID: {self.camera_id}")
+            print(f"[Camera] Resolution: {self.width}x{self.height}")
+            print(f"[Camera] FPS: {config.CAMERA_FPS}")
             return True
             
         except Exception as e:
@@ -66,16 +84,22 @@ class Camera:
         return True
     
     def _capture_loop(self):
-        """Continuous capture loop"""
+        """Continuous capture loop (OPTIMIZED)"""
         while self.running:
-            ret, frame = self.cap.read()
+            # Grab frame (faster, doesn't decode)
+            ret = self.cap.grab()
             
             if ret:
-                with self.lock:
-                    self.frame = frame
+                # Retrieve and decode only if grabbed successfully
+                ret, frame = self.cap.retrieve()
+                if ret:
+                    with self.lock:
+                        self.frame = frame
+                else:
+                    time.sleep(0.001)  # Minimal sleep
             else:
-                print("[WARNING] Failed to read frame")
-                time.sleep(0.1)
+                print("[WARNING] Failed to grab frame")
+                time.sleep(0.01)
     
     def get_frame(self):
         """Get latest frame (thread-safe)"""

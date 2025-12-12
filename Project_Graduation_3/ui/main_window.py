@@ -221,7 +221,7 @@ class MainWindow:
         print("="*60 + "\n")
     
     def _update_video_loop(self):
-        """Continuous video update loop"""
+        """Continuous video update loop (OPTIMIZED)"""
         try:
             frame = self.camera.get_frame()
             
@@ -240,23 +240,26 @@ class MainWindow:
                     for crossed_obj in result['crossed_objects']:
                         self._on_bottle_crossed_line(crossed_obj, frame)
                 
-                # Convert to Tkinter format
+                # Convert to Tkinter format (OPTIMIZED)
                 frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                img = Image.fromarray(frame_rgb)
                 
-                # Resize to fit window
-                display_width = 900
+                # Resize using faster method
+                display_width = config.VIDEO_DISPLAY_WIDTH
                 h, w = frame_rgb.shape[:2]
                 aspect_ratio = h / w
                 display_height = int(display_width * aspect_ratio)
-                img = img.resize((display_width, display_height), Image.LANCZOS)
                 
+                # Use cv2.resize (faster than PIL)
+                frame_resized = cv2.resize(frame_rgb, (display_width, display_height), 
+                                          interpolation=cv2.INTER_LINEAR)
+                
+                img = Image.fromarray(frame_resized)
                 imgtk = ImageTk.PhotoImage(image=img)
                 self.video_label.imgtk = imgtk
                 self.video_label.configure(image=imgtk)
             
-            # Schedule next update (30 FPS = ~33ms)
-            self.root.after(33, self._update_video_loop)
+            # Schedule next update
+            self.root.after(config.UI_UPDATE_INTERVAL, self._update_video_loop)
             
         except Exception as e:
             print(f"[ERROR] Video update loop failed: {e}")
