@@ -285,109 +285,103 @@ class AIEngine:
     
     def _decode_yolo_output(self, output, img_w, img_h):
         """
-        Decode NCNN output (SIMPLIFIED - FIX THEO MODEL)
+        Decode NCNN output - COPY TỪ PROJECT_GRADUATION (HOẠT ĐỘNG)
         
-        Assumptions:
-        - Output format: [x, y, w, h, class0, class1, ...]
-        - KHÔNG có objectness riêng
-        - class score chính là confidence
+        YOLOv8 NCNN format:
+        - Shape: (num_detections, 4+num_classes) hoặc (4+num_classes, num_detections)
+        - Format: [x_center, y_center, width, height, class0_score, class1_score, ...]
+        - Coordinates: Scaled to input_size (0-640), NOT normalized (0-1)
         """
         detections = []
         
         try:
-            # Convert to numpy
-            out_np = np.array(output)
+            # Convert ncnn.Mat to numpy array
+            output_np = np.array(output)
             
             if config.DEBUG_MODE:
-                print(f"[AI] Raw output shape: {out_np.shape}")
+                print(f"[AI] NCNN output shape: {output_np.shape}")
             
-            # Handle different shapes
-            if len(out_np.shape) == 3:
-                out_np = out_np.squeeze(0)
+            # Handle batch dimension
+            if len(output_np.shape) == 3:
+                output_np = output_np[0]
             
-            if len(out_np.shape) == 2:
-                # Check if transposed (12, 8400) → (8400, 12)
-                if out_np.shape[0] == 4 + self.num_classes and out_np.shape[1] > 1000:
-                    out_np = out_np.T
-                    if config.DEBUG_MODE:
-                        print(f"[AI] Transposed to: {out_np.shape}")
+            # YOLOv8 NCNN format: (num_classes+4, num_boxes) -> Transpose to (num_boxes, num_classes+4)
+            # If shape[0] < shape[1], it means we need to transpose
+            if output_np.shape[0] < output_np.shape[1]:
+                output_np = output_np.T
+                if config.DEBUG_MODE:
+                    print(f"[AI] Transposed to: {output_np.shape}")
             
-            if len(out_np.shape) != 2:
-                print(f"[ERROR] Unexpected output shape: {out_np.shape}")
-                return []
-            
-            num_rows, num_features = out_np.shape
+            num_detections = output_np.shape[0]
             num_classes = len(self.class_names)
-            
-            if config.DEBUG_MODE:
-                print(f"[AI] Rows: {num_rows}, Features: {num_features}")
-            
-            # Verify feature count
-            if num_features < 4 + num_classes:
-                print(f"[ERROR] Invalid output: {out_np.shape}")
-                return []
             
             # Scale factors
             scale_x = img_w / self.input_size
             scale_y = img_h / self.input_size
             
-            # Process each detection
-            for row in out_np:
-                # Bbox coordinates
-                x, y, w, h = row[0:4]
+            # Limit number of detections to process
+            max_process = min(num_detections, 8400)
+            
+            for i in range(max_process):
+                detection = output_np[i]
                 
-                if w <= 0 or h <= 0:
+                # Check if detection has enough values
+                if len(detection) < 4 + num_classes:
                     continue
                 
-                # Class scores
-                class_scores = row[4:4 + num_classes]
-                class_id = int(np.argmax(class_scores))
+                # YOLOv8 format: [x_center, y_center, width, height, class1_score, class2_score, ...]
+                # Coordinates are in input_size scale (0-640), not normalized (0-1)
+                # SCALE NGAY KHI ĐỌC (QUAN TRỌNG!)
+                x_center = detection[0] * scale_x
+                y_center = detection[1] * scale_y
+                width = detection[2] * scale_x
+                height = detection[3] * scale_y
+                
+                # Extract class scores
+                class_scores = detection[4:4+num_classes]
+                
+                # Get best class
+                class_id = np.argmax(class_scores)
                 confidence = float(class_scores[class_id])
                 
-                if confidence < self.conf_threshold:
-                    continue
-                
-                # Scale bbox
-                cx = x * scale_x
-                cy = y * scale_y
-                bw = w * scale_x
-                bh = h * scale_y
-                
-                x1 = int(cx - bw / 2)
-                y1 = int(cy - bh / 2)
-                x2 = int(cx + bw / 2)
-                y2 = int(cy + bh / 2)
-                
-                # Clamp to image bounds
-                x1 = max(0, min(x1, img_w - 1))
-                y1 = max(0, min(y1, img_h - 1))
-                x2 = max(x1 + 1, min(x2, img_w))
-                y2 = max(y1 + 1, min(y2, img_h))
-                
-                # Skip too small boxes
-                if (x2 - x1) < 10 or (y2 - y1) < 10:
-                    continue
-                
-                detections.append({
-                    'class_id': class_id,
-                    'class_name': self.class_names[class_id],
-                    'confidence': confidence,
-                    'bbox': [x1, y1, x2, y2]
-                })
-                
-                if config.DEBUG_MODE and len(detections) <= 5:
-                    print(f"[AI] Detection: {self.class_names[class_id]} ({confidence:.2f}) at [{x1},{y1},{x2},{y2}]")
+                # Filter by confidence
+                if confidence > self.conf_threshold:
+                    # Convert to corner format
+                    x1 = int(x_center - width / 2)
+                    y1 = int(y_center - height / 2)
+                    x2 = int(x_center + width / 2)
+                    y2 = int(y_center + height / 2)
+                    
+                    # Clamp to image bounds
+                    x1 = max(0, min(x1, img_w))
+                    y1 = max(0, min(y1, img_h))
+                    x2 = max(0, min(x2, img_w))
+                    y2 = max(0, min(y2, img_h))
+                    
+                    # Only add if box is valid
+                    if x2 > x1 and y2 > y1:
+                        detections.append({
+                            'class_id': int(class_id),
+                            'class_name': self.class_names[class_id],
+                            'confidence': confidence,
+                            'bbox': [x1, y1, x2, y2]
+                        })
+                        
+                        # Debug first detection
+                        if config.DEBUG_MODE and len(detections) == 1:
+                            print(f"[AI] First detection: {self.class_names[class_id]} "
+                                  f"at ({x1},{y1})-({x2},{y2}), conf={confidence:.2f}")
             
             if config.DEBUG_MODE:
                 print(f"[AI] Total detections: {len(detections)}")
-            
-            return detections
         
         except Exception as e:
-            print(f"[ERROR] Decode failed: {e}")
-            import traceback
-            traceback.print_exc()
-            return []
+            print(f"[ERROR] Parse NCNN output failed: {e}")
+            if config.DEBUG_MODE:
+                import traceback
+                traceback.print_exc()
+        
+        return detections
 
     
     def _apply_nms(self, detections):
