@@ -1,20 +1,20 @@
-# Coca-Cola Sorting System - Python Dependencies
+# Coca-Cola Sorting System - Python Dependencies (CONTINUOUS MODE)
 
-# Computer Vision & AI
+# Computer Vision
 opencv-python>=4.8.0
-Pillow>=10.0.0
-ultralytics>=8.0.0  # YOLOv8
 numpy>=1.24.0
+Pillow>=10.0.0
+
+# NCNN (for fast inference on Raspberry Pi)
+# Install with: pip install ncnn
+# Or build from source: https://github.com/Tencent/ncnn
+ncnn>=1.0.0
 
 # Serial Communication
 pyserial>=3.5
 
-# Database
-# sqlite3 is included in Python standard library
+# GUI (included with Python)
+# tkinter (usually pre-installed)
 
-# GUI
-# tkinter is included in Python standard library
-
-# Additional utilities for YOLOv8
-torch>=2.0.0  # PyTorch for YOLOv8
-torchvision>=0.15.0
+# Optional: For model conversion
+# ultralytics  # If you need to convert YOLO to NCNN

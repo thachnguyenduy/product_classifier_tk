@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Coca-Cola Sorting System - Main Entry Point
-Stop-and-Go workflow with AI-based quality inspection
+Coca-Cola Sorting System - Main Entry Point (CONTINUOUS MODE)
+Continuous conveyor operation with circular buffer queue for rejection timing
 """
 
 import tkinter as tk
@@ -17,18 +17,19 @@ from core.ai import AIEngine
 from core.hardware import HardwareController, DummyHardwareController
 from core.database import Database
 from ui.main_window import MainWindow
+import config
 
 
-class SortingSystemApp:
+class ContinuousSortingSystem:
     """
-    Main application class for Coca-Cola Sorting System
+    Main application class for Continuous Coca-Cola Sorting System
     """
     
     def __init__(self):
         """Initialize the application"""
-        print("=" * 60)
-        print("🥤 COCA-COLA SORTING SYSTEM")
-        print("=" * 60)
+        print("=" * 70)
+        print("🥤 COCA-COLA SORTING SYSTEM - CONTINUOUS MODE")
+        print("=" * 70)
         print()
         
         self.root = None
@@ -37,32 +38,6 @@ class SortingSystemApp:
         self.hardware = None
         self.database = None
         self.main_window = None
-        
-        # Configuration (ưu tiên đọc từ config.py)
-        try:
-            import config
-            self.config = {
-                'camera_id': getattr(config, 'CAMERA_ID', 0),
-                'camera_width': getattr(config, 'CAMERA_WIDTH', 640),
-                'camera_height': getattr(config, 'CAMERA_HEIGHT', 480),
-                'arduino_port': getattr(config, 'ARDUINO_PORT', '/dev/ttyUSB0'),
-                'arduino_baudrate': getattr(config, 'ARDUINO_BAUDRATE', 9600),
-                'model_path': getattr(config, 'MODEL_PATH', 'model/best.pt'),
-                'use_dummy_camera': getattr(config, 'USE_DUMMY_CAMERA', False),
-                'use_dummy_hardware': getattr(config, 'USE_DUMMY_HARDWARE', False),
-            }
-        except ImportError:
-            # Fallback nếu không có file config.py
-            self.config = {
-                'camera_id': 0,
-                'camera_width': 640,
-                'camera_height': 480,
-                'arduino_port': '/dev/ttyUSB0',
-                'arduino_baudrate': 9600,
-                'model_path': 'model/best.pt',
-                'use_dummy_camera': False,
-                'use_dummy_hardware': False,
-            }
     
     def initialize_components(self):
         """Initialize all system components"""
@@ -71,144 +46,166 @@ class SortingSystemApp:
         try:
             # 1. Initialize Database
             print("\n[1/4] Initializing database...")
-            self.database = Database(db_path="database/product.db")
+            self.database = Database(db_path=config.DATABASE_PATH)
+            print("      ✓ Database ready")
             
             # 2. Initialize AI Engine
             print("\n[2/4] Initializing AI engine...")
-            self.ai = AIEngine(model_path=self.config['model_path'])
+            self.ai = AIEngine(model_path=config.MODEL_PATH, config=config)
+            print("      ✓ AI engine ready")
             
             # 3. Initialize Camera
             print("\n[3/4] Initializing camera...")
-            if self.config['use_dummy_camera']:
+            if config.USE_DUMMY_CAMERA:
+                print("      Using DUMMY camera (testing mode)")
                 self.camera = DummyCamera(
-                    width=self.config['camera_width'],
-                    height=self.config['camera_height']
+                    width=config.CAMERA_WIDTH,
+                    height=config.CAMERA_HEIGHT
                 )
             else:
                 self.camera = Camera(
-                    camera_id=self.config['camera_id'],
-                    width=self.config['camera_width'],
-                    height=self.config['camera_height']
+                    camera_id=config.CAMERA_ID,
+                    width=config.CAMERA_WIDTH,
+                    height=config.CAMERA_HEIGHT,
+                    fps=config.CAMERA_FPS,
+                    exposure=config.CAMERA_EXPOSURE,
+                    auto_exposure=config.CAMERA_AUTO_EXPOSURE
                 )
             
             if not self.camera.start():
-                print("[WARNING] Failed to start camera. Switching to dummy mode...")
+                print("      [WARNING] Failed to start camera. Switching to dummy mode...")
                 self.camera = DummyCamera(
-                    width=self.config['camera_width'],
-                    height=self.config['camera_height']
+                    width=config.CAMERA_WIDTH,
+                    height=config.CAMERA_HEIGHT
                 )
                 self.camera.start()
             
+            print("      ✓ Camera ready")
+            
             # 4. Initialize Hardware Controller
             print("\n[4/4] Initializing hardware controller...")
-            if self.config['use_dummy_hardware']:
-                self.hardware = DummyHardwareController()
+            if config.USE_DUMMY_HARDWARE:
+                print("      Using DUMMY hardware (testing mode)")
+                self.hardware = DummyHardwareController(
+                    port=config.ARDUINO_PORT,
+                    baudrate=config.ARDUINO_BAUDRATE,
+                    timeout=config.ARDUINO_TIMEOUT
+                )
             else:
                 self.hardware = HardwareController(
-                    port=self.config['arduino_port'],
-                    baudrate=self.config['arduino_baudrate']
+                    port=config.ARDUINO_PORT,
+                    baudrate=config.ARDUINO_BAUDRATE,
+                    timeout=config.ARDUINO_TIMEOUT
                 )
             
             if not self.hardware.connect():
-                print("[WARNING] Failed to connect to Arduino. Switching to dummy mode...")
-                self.hardware = DummyHardwareController()
+                print("      [WARNING] Failed to connect to Arduino. Switching to dummy mode...")
+                self.hardware = DummyHardwareController(
+                    port=config.ARDUINO_PORT,
+                    baudrate=config.ARDUINO_BAUDRATE,
+                    timeout=config.ARDUINO_TIMEOUT
+                )
                 self.hardware.connect()
             
-            print("\n" + "=" * 60)
-            print("✓ All components initialized successfully")
-            print("=" * 60)
+            print("      ✓ Hardware ready")
+            
+            print("\n" + "=" * 70)
+            print("✓ ALL COMPONENTS INITIALIZED SUCCESSFULLY")
+            print("=" * 70)
             print()
             
             return True
             
         except Exception as e:
-            print(f"\n[ERROR] Failed to initialize components: {e}")
+            print(f"\n[ERROR] Component initialization failed: {e}")
+            import traceback
+            traceback.print_exc()
             return False
-    
-    def create_directories(self):
-        """Create necessary directories"""
-        directories = [
-            'captures/ok',
-            'captures/ng',
-            'database'
-        ]
-        
-        for directory in directories:
-            os.makedirs(directory, exist_ok=True)
     
     def run(self):
         """Run the application"""
-        # Create necessary directories
-        self.create_directories()
+        print("[System] Starting application...")
         
         # Initialize components
         if not self.initialize_components():
-            print("[ERROR] Failed to initialize system. Exiting...")
-            sys.exit(1)
+            print("[ERROR] Failed to initialize components. Exiting...")
+            return
         
-        # Create Tkinter root window
+        # Create Tkinter root
         self.root = tk.Tk()
         
         # Create main window
-        print("[System] Starting user interface...")
         self.main_window = MainWindow(
-            root=self.root,
-            camera=self.camera,
-            ai_engine=self.ai,
-            hardware=self.hardware,
-            database=self.database
+            self.root,
+            self.camera,
+            self.ai,
+            self.hardware,
+            self.database
         )
         
-        # Set closing handler
-        self.root.protocol("WM_DELETE_WINDOW", self.main_window.on_closing)
+        # Handle window close
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
-        print("[System] System ready! 🚀")
+        # Print system info
+        self._print_system_info()
+        
+        # Start Tkinter main loop
+        print("[System] UI ready. Starting main loop...")
         print()
-        print("INSTRUCTIONS:")
-        print("1. Click 'START SYSTEM' to begin sorting")
-        print("2. Place bottles on the conveyor")
-        print("3. System will automatically detect, inspect, and sort")
-        print("4. Click 'STOP SYSTEM' to pause")
-        print("5. View history and statistics in the History window")
-        print()
-        
-        # Run Tkinter main loop
-        try:
-            self.root.mainloop()
-        except KeyboardInterrupt:
-            print("\n[System] Shutting down...")
-        
-        # Cleanup
-        self.cleanup()
+        self.root.mainloop()
     
-    def cleanup(self):
-        """Cleanup resources"""
-        print("[System] Cleaning up...")
+    def on_closing(self):
+        """Handle window close event"""
+        print("\n[System] Shutting down...")
         
-        if self.camera:
-            self.camera.stop()
-        
-        if self.hardware:
-            self.hardware.disconnect()
-        
-        if self.database:
-            self.database.close()
-        
-        print("[System] Shutdown complete. Goodbye! 👋")
+        try:
+            # Stop camera
+            if self.camera:
+                self.camera.stop()
+            
+            # Disconnect hardware
+            if self.hardware:
+                self.hardware.disconnect()
+            
+            # Destroy window
+            if self.root:
+                self.root.destroy()
+            
+            print("[System] Shutdown complete")
+            
+        except Exception as e:
+            print(f"[ERROR] Shutdown error: {e}")
+    
+    def _print_system_info(self):
+        """Print system configuration information"""
+        print("\n" + "=" * 70)
+        print("SYSTEM CONFIGURATION")
+        print("=" * 70)
+        print(f"Mode:              CONTINUOUS (No conveyor stopping)")
+        print(f"Travel Time:       {config.TRAVEL_TIME_MS} ms")
+        print(f"Camera:            {config.CAMERA_ID} ({config.CAMERA_WIDTH}x{config.CAMERA_HEIGHT})")
+        print(f"Camera Exposure:   {config.CAMERA_EXPOSURE}")
+        print(f"Arduino Port:      {config.ARDUINO_PORT}")
+        print(f"Model:             {config.MODEL_PATH}")
+        print(f"Confidence:        {config.CONFIDENCE_THRESHOLD}")
+        print(f"NMS Threshold:     {config.NMS_THRESHOLD}")
+        print(f"Debug Mode:        {config.DEBUG_MODE}")
+        print("=" * 70)
+        print()
 
 
 def main():
     """Main entry point"""
-    # Check Python version
-    if sys.version_info < (3, 7):
-        print("ERROR: Python 3.7 or higher is required")
-        sys.exit(1)
-    
-    # Create and run application
-    app = SortingSystemApp()
-    app.run()
+    try:
+        app = ContinuousSortingSystem()
+        app.run()
+    except KeyboardInterrupt:
+        print("\n[System] Interrupted by user")
+    except Exception as e:
+        print(f"\n[ERROR] Application error: {e}")
+        import traceback
+        traceback.print_exc()
 
 
 if __name__ == "__main__":
     main()
-
