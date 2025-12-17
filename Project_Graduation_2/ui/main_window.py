@@ -351,21 +351,28 @@ class MainWindow:
         Args:
             result: Result dict from AI
         """
+        # Chia nhỏ: luôn cố gắng ghi DB, kể cả khi lưu ảnh bị lỗi
+        image_path = ""
+
+        # 1. Lưu ảnh (nếu có), không để lỗi ảnh chặn việc ghi DB
         try:
-            # Save image
-            decision = result['result']
+            decision = result.get('result', 'UNKNOWN')
             save_dir = "captures/ok" if decision == 'OK' else "captures/ng"
             image = result.get('annotated_image')
-            
+
             if image is not None:
                 image_path = self.camera.save_image(image, save_dir, decision)
-                result['image_path'] = image_path
-            
-            # Add to database
-            self.database.add_inspection(result)
-            
         except Exception as e:
-            print(f"[ERROR] Failed to save result: {e}")
+            print(f"[ERROR] Failed to save image for result: {e}")
+
+        # 2. Ghi đường dẫn ảnh (nếu thành công) vào result và luôn cố gắng ghi DB
+        if image_path:
+            result['image_path'] = image_path
+
+        try:
+            self.database.add_inspection(result)
+        except Exception as e:
+            print(f"[ERROR] Failed to add inspection to database: {e}")
     
     def _update_statistics(self):
         """Update statistics display"""
