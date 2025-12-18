@@ -34,7 +34,7 @@ unsigned long TRAVEL_TIME = 4500;  // Time (ms) from sensor to servo position
 // Servo Configuration
 const int SERVO_IDLE = 0;         // Idle position (retracted)
 const int SERVO_KICK = 100;       // Kick position (extended)
-const int SERVO_KICK_DURATION = 150;  // How long servo stays extended (ms)
+const int SERVO_KICK_DURATION = 2000;  // How long servo stays extended/blocking (ms) - 2000ms = 2s
 
 // Circular Buffer Configuration
 const int BUFFER_SIZE = 20;       // Max bottles that can be tracked simultaneously

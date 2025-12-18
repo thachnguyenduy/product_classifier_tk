@@ -5,6 +5,7 @@ Display inspection history and statistics
 
 import tkinter as tk
 from tkinter import ttk
+import threading
 
 
 class HistoryWindow:
@@ -27,9 +28,10 @@ class HistoryWindow:
         self.window.title("Inspection History")
         self.window.geometry("1000x600")
         self.window.configure(bg='#2c3e50')
+        self.window.protocol("WM_DELETE_WINDOW", self.window.destroy)
         
         self._setup_ui()
-        self._load_data()
+        self._load_data_async()
     
     def _setup_ui(self):
         """Setup UI layout"""
@@ -88,32 +90,54 @@ class HistoryWindow:
         button_frame = tk.Frame(self.window, bg='#2c3e50')
         button_frame.pack(pady=10)
         
-        refresh_btn = tk.Button(button_frame, text="REFRESH",
-                               font=('Arial', 11),
-                               bg='#3498db', fg='white',
-                               width=15,
-                               command=self._load_data)
-        refresh_btn.pack(side=tk.LEFT, padx=5)
+        self.refresh_btn = tk.Button(
+            button_frame, text="REFRESH",
+            font=('Arial', 11),
+            bg='#3498db', fg='white',
+            width=15,
+            command=self._load_data_async
+        )
+        self.refresh_btn.pack(side=tk.LEFT, padx=5)
         
-        close_btn = tk.Button(button_frame, text="CLOSE",
-                             font=('Arial', 11),
-                             bg='#95a5a6', fg='white',
-                             width=15,
-                             command=self.window.destroy)
+        close_btn = tk.Button(
+            button_frame, text="CLOSE",
+            font=('Arial', 11),
+            bg='#95a5a6', fg='white',
+            width=15,
+            command=self.window.destroy
+        )
         close_btn.pack(side=tk.LEFT, padx=5)
     
-    def _load_data(self):
-        """Load inspection data from database"""
+    def _load_data_async(self):
+        """
+        Load inspection data from database without blocking the Tkinter UI thread.
+        This prevents REFRESH/CLOSE from "freezing" when the DB is temporarily locked.
+        """
+        try:
+            if hasattr(self, "refresh_btn") and self.refresh_btn:
+                self.refresh_btn.configure(state=tk.DISABLED, text="LOADING...")
+        except Exception:
+            pass
+
+        t = threading.Thread(target=self._fetch_and_render, daemon=True)
+        t.start()
+
+    def _fetch_and_render(self):
+        try:
+            inspections = self.database.get_recent_inspections(limit=100)
+        except Exception:
+            inspections = []
+
+        # Render on UI thread
+        self.window.after(0, self._render_rows, inspections)
+
+    def _render_rows(self, inspections):
         # Clear existing data
         for item in self.tree.get_children():
             self.tree.delete(item)
-        
-        # Get recent inspections
-        inspections = self.database.get_recent_inspections(limit=100)
-        
-        # Add to table
+
         for row in inspections:
-            # row format: (id, timestamp, result, reason, has_cap, has_filled, 
+            # row format: (id, timestamp, result, reason, has_cap, has_filled,
             #              has_label, defects, image_path, processing_time, num_detections)
             id_val = row[0]
             timestamp = row[1]
@@ -124,19 +148,20 @@ class HistoryWindow:
             has_label = '✓' if row[6] else '✗'
             defects = row[7] if row[7] else '-'
             proc_time = f"{row[9]*1000:.1f}" if row[9] else '-'
-            
-            # Add row
-            self.tree.insert('', tk.END, values=(
+
+            item_id = self.tree.insert('', tk.END, values=(
                 id_val, timestamp, result, reason,
                 has_cap, has_filled, has_label, defects, proc_time
             ))
-            
-            # Color code by result
-            if result == 'OK':
-                self.tree.item(self.tree.get_children()[-1], tags=('ok',))
-            else:
-                self.tree.item(self.tree.get_children()[-1], tags=('ng',))
-        
+
+            self.tree.item(item_id, tags=('ok',) if result == 'OK' else ('ng',))
+
         # Configure tags
         self.tree.tag_configure('ok', background='#d5f4e6')
         self.tree.tag_configure('ng', background='#fadbd8')
+
+        try:
+            if hasattr(self, "refresh_btn") and self.refresh_btn:
+                self.refresh_btn.configure(state=tk.NORMAL, text="REFRESH")
+        except Exception:
+            pass
