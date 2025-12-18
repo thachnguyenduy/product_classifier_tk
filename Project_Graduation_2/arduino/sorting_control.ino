@@ -1,17 +1,21 @@
 /*
- * Coca-Cola Sorting System - Arduino Controller (CONTINUOUS CONVEYOR)
+ * Coca-Cola Sorting System - Arduino Controller (DUAL SENSOR MODE)
  * Hardware: Arduino Uno
- * Components: IR Sensor (Pin 2), Relay Module (Pin 4), Servo Motor (Pin 9)
+ * Components: 
+ *   - IR Sensor 1 (Pin 2): Detects bottle at start → triggers AI
+ *   - IR Sensor 2 (Pin 3): Detects bottle near servo → triggers kick if NG
+ *   - Relay Module (Pin 4): Conveyor control
+ *   - Servo Motor MG996R (Pin 9): Linear actuator for rejection
  * 
- * WORKFLOW (Continuous - No Stopping):
+ * WORKFLOW (Dual Sensor - No TRAVEL_TIME needed):
  * 1. Conveyor ALWAYS runs (Relay = LOW)
- * 2. IR Sensor detects bottle -> Send 'D' to Pi -> Record timestamp
- * 3. Pi responds with 'O' (OK) or 'N' (NG)
- * 4. If 'N': Calculate kick_time = timestamp + TRAVEL_TIME, add to circular buffer
- * 5. Loop continuously checks buffer, kicks bottle when millis() >= kick_time
+ * 2. Sensor 1 detects bottle → Send 'D' to Pi → Add to queue as "pending"
+ * 3. Pi responds with 'O' (OK) or 'N' (NG) → Mark bottle in queue
+ * 4. Sensor 2 detects bottle → Check queue:
+ *    - If NG pending → Kick immediately
+ *    - If OK → Let pass
  * 
- * CRITICAL: TRAVEL_TIME = Time from sensor to servo position (~4500ms default)
- * Multiple bottles can be in the processing zone simultaneously
+ * ADVANTAGE: No need to calibrate TRAVEL_TIME, works with any conveyor speed
  */
 
 #include <Servo.h>
@@ -21,28 +25,25 @@
 // ============================================================================
 
 // Pin Definitions
-const int SENSOR_PIN = 2;     // IR Sensor Input
-const int RELAY_PIN = 4;      // Relay Control (LOW = Run, HIGH = Stop - but we keep it LOW always)
-const int SERVO_PIN = 9;      // Servo Motor for rejection
+const int SENSOR_1_PIN = 2;     // IR Sensor 1 (Start position - triggers AI)
+const int SENSOR_2_PIN = 3;     // IR Sensor 2 (Near servo - triggers kick)
+const int RELAY_PIN = 4;        // Relay Control (LOW = Run, HIGH = Stop)
+const int SERVO_PIN = 9;        // Servo Motor MG996R for rejection
 
-// Timing Configuration
-unsigned long TRAVEL_TIME = 4500;  // Time (ms) from sensor to servo position
-                                    // CRITICAL: Measure this physically!
-                                    // Too short = kick early (miss bottle)
-                                    // Too long = kick late (wrong bottle)
-
-// Servo Configuration
-const int SERVO_IDLE = 0;         // Idle position (retracted)
-const int SERVO_KICK = 100;       // Kick position (extended)
-const int SERVO_KICK_DURATION = 2000;  // How long servo stays extended/blocking (ms) - 2000ms = 2s
+// Servo Configuration (MG996R optimized)
+const int SERVO_IDLE = 0;         // Idle position (rack retracted, no blocking)
+const int SERVO_KICK = 90;        // Kick position (rack extended, blocking conveyor)
+                                  // MG996R: 0-180°, adjust based on rack travel distance
+const int SERVO_KICK_DURATION = 2000;  // How long servo stays extended (ms)
+                                       // Keeps rack blocking for 2 seconds so bottle falls by inertia
 
 // Circular Buffer Configuration
 const int BUFFER_SIZE = 20;       // Max bottles that can be tracked simultaneously
-                                  // With 4.5s travel time and ~2 bottles/sec = need ~10 slots
-                                  // 20 provides safety margin
+                                  // Allows multiple bottles in processing zone
 
 // Sensor Debouncing
 const int DEBOUNCE_DELAY = 300;   // Minimum time between detections (ms)
+                                  // Prevents double-counting same bottle
 
 // ============================================================================
 // GLOBAL VARIABLES
@@ -50,19 +51,24 @@ const int DEBOUNCE_DELAY = 300;   // Minimum time between detections (ms)
 
 Servo rejectServo;
 
-// Circular Buffer for Kick Times
-unsigned long kickQueue[BUFFER_SIZE];
+// Queue for pending rejections (true = NG pending, false = OK or empty)
+bool pendingRejections[BUFFER_SIZE];
 int queueHead = 0;  // Index to read from (oldest)
 int queueTail = 0;  // Index to write to (newest)
 int queueCount = 0; // Number of items in queue
 
-// Sensor State
-bool lastSensorState = HIGH;
-unsigned long lastDetectionTime = 0;
+// Sensor 1 State (Start position)
+bool lastSensor1State = HIGH;
+unsigned long lastSensor1Time = 0;
+
+// Sensor 2 State (Near servo)
+bool lastSensor2State = HIGH;
+unsigned long lastSensor2Time = 0;
 
 // Statistics
 unsigned long totalDetections = 0;
 unsigned long totalRejections = 0;
+unsigned long totalPassed = 0;
 
 // ============================================================================
 // SETUP
@@ -73,27 +79,33 @@ void setup() {
   Serial.begin(9600);
   
   // Configure Pins
-  pinMode(SENSOR_PIN, INPUT);
+  pinMode(SENSOR_1_PIN, INPUT);
+  pinMode(SENSOR_2_PIN, INPUT);
   pinMode(RELAY_PIN, OUTPUT);
   
-  // Initialize Servo
+  // Initialize Servo MG996R
   rejectServo.attach(SERVO_PIN);
   rejectServo.write(SERVO_IDLE);
   
-  // CRITICAL: Conveyor ALWAYS runs in continuous mode
+  // Conveyor ALWAYS runs in continuous mode
   digitalWrite(RELAY_PIN, LOW);
   
-  // Initialize circular buffer (all zeros)
+  // Initialize queue (all false = no pending rejections)
   for (int i = 0; i < BUFFER_SIZE; i++) {
-    kickQueue[i] = 0;
+    pendingRejections[i] = false;
   }
   
   // Startup Message
   Serial.println("========================================");
-  Serial.println("Coca-Cola Sorting System - CONTINUOUS MODE");
+  Serial.println("Coca-Cola Sorting System - DUAL SENSOR MODE");
   Serial.println("========================================");
-  Serial.print("Travel Time: ");
-  Serial.print(TRAVEL_TIME);
+  Serial.println("Servo: MG996R Linear Actuator");
+  Serial.println("Sensor 1 (Pin 2): Start position - triggers AI");
+  Serial.println("Sensor 2 (Pin 3): Near servo - triggers kick");
+  Serial.print("Servo Kick Angle: ");
+  Serial.println(SERVO_KICK);
+  Serial.print("Kick Duration: ");
+  Serial.print(SERVO_KICK_DURATION);
   Serial.println(" ms");
   Serial.print("Buffer Size: ");
   Serial.println(BUFFER_SIZE);
@@ -107,44 +119,54 @@ void setup() {
 // ============================================================================
 
 void loop() {
-  // 1. Check IR Sensor for bottle detection
-  checkSensor();
+  // 1. Check Sensor 1 (Start position) for bottle detection
+  checkSensor1();
   
-  // 2. Check Serial for Pi's decision ('O' or 'N')
+  // 2. Check Sensor 2 (Near servo) for kick trigger
+  checkSensor2();
+  
+  // 3. Check Serial for Pi's decision ('O' or 'N')
   checkSerial();
-  
-  // 3. Process kick queue (trigger servo if time has come)
-  processKickQueue();
   
   // Small delay to prevent CPU overload
   delay(10);
 }
 
 // ============================================================================
-// SENSOR DETECTION
+// SENSOR 1 DETECTION (Start Position - Triggers AI)
 // ============================================================================
 
-void checkSensor() {
-  bool currentSensorState = digitalRead(SENSOR_PIN);
+void checkSensor1() {
+  bool currentState = digitalRead(SENSOR_1_PIN);
   unsigned long currentTime = millis();
   
   // Detect falling edge (HIGH -> LOW) with debouncing
-  if (lastSensorState == HIGH && currentSensorState == LOW) {
-    // Check debounce
-    if (currentTime - lastDetectionTime > DEBOUNCE_DELAY) {
+  if (lastSensor1State == HIGH && currentState == LOW) {
+    if (currentTime - lastSensor1Time > DEBOUNCE_DELAY) {
       handleBottleDetection(currentTime);
-      lastDetectionTime = currentTime;
+      lastSensor1Time = currentTime;
     }
   }
   
-  lastSensorState = currentSensorState;
+  lastSensor1State = currentState;
 }
 
 void handleBottleDetection(unsigned long detectionTime) {
   totalDetections++;
   
+  // Add new entry to queue (initially OK, will be updated when Pi responds)
+  if (queueCount < BUFFER_SIZE) {
+    pendingRejections[queueTail] = false;  // Default: OK (no rejection)
+    queueTail = (queueTail + 1) % BUFFER_SIZE;
+    queueCount++;
+    
+    Serial.print("[Sensor 1] Bottle detected → AI triggered | Queue: ");
+    Serial.println(queueCount);
+  } else {
+    Serial.println("[ERROR] Queue full! Cannot track bottle.");
+  }
+  
   // Send detection signal to Raspberry Pi
-  // Format: 'D' followed by timestamp for Pi's reference
   Serial.print('D');
   Serial.print(',');
   Serial.println(detectionTime);
@@ -152,6 +174,48 @@ void handleBottleDetection(unsigned long detectionTime) {
   // Debug output
   if (totalDetections % 10 == 0) {
     printStatistics();
+  }
+}
+
+// ============================================================================
+// SENSOR 2 DETECTION (Near Servo - Triggers Kick)
+// ============================================================================
+
+void checkSensor2() {
+  bool currentState = digitalRead(SENSOR_2_PIN);
+  unsigned long currentTime = millis();
+  
+  // Detect falling edge (HIGH -> LOW) with debouncing
+  if (lastSensor2State == HIGH && currentState == LOW) {
+    if (currentTime - lastSensor2Time > DEBOUNCE_DELAY) {
+      handleServoSensorDetection();
+      lastSensor2Time = currentTime;
+    }
+  }
+  
+  lastSensor2State = currentState;
+}
+
+void handleServoSensorDetection() {
+  // Check if there's a pending rejection at the head of queue
+  if (queueCount > 0) {
+    if (pendingRejections[queueHead]) {
+      // There's a NG bottle waiting → Kick it now!
+      executeKick();
+      Serial.println("[Sensor 2] NG bottle detected → KICKED!");
+    } else {
+      // OK bottle → Let it pass
+      totalPassed++;
+      Serial.println("[Sensor 2] OK bottle detected → PASSED");
+    }
+    
+    // Remove from queue
+    pendingRejections[queueHead] = false;
+    queueHead = (queueHead + 1) % BUFFER_SIZE;
+    queueCount--;
+  } else {
+    // Queue empty but sensor 2 triggered (shouldn't happen normally)
+    Serial.println("[WARNING] Sensor 2 triggered but queue empty");
   }
 }
 
@@ -164,75 +228,48 @@ void checkSerial() {
     char decision = Serial.read();
     
     if (decision == 'O') {
-      // OK product - do nothing, let it pass
-      // Serial.println("[Arduino] OK - Pass");
+      // OK product - mark most recent entry as OK (already false, so just log)
+      Serial.println("[Pi Decision] OK → Bottle will pass");
     } 
     else if (decision == 'N') {
-      // NG product - schedule kick
-      scheduleKick();
+      // NG product - mark the most recent entry as pending rejection
+      markAsRejection();
     }
   }
 }
 
-void scheduleKick() {
-  // Calculate when to kick (current time + travel time)
-  unsigned long kickTime = millis() + TRAVEL_TIME;
+void markAsRejection() {
+  // Find the most recent entry (queueTail - 1, wrapping if needed)
+  int recentIndex = (queueTail - 1 + BUFFER_SIZE) % BUFFER_SIZE;
   
-  // Add to circular buffer
-  if (queueCount < BUFFER_SIZE) {
-    kickQueue[queueTail] = kickTime;
-    queueTail = (queueTail + 1) % BUFFER_SIZE;
-    queueCount++;
+  if (queueCount > 0) {
+    pendingRejections[recentIndex] = true;
     totalRejections++;
     
-    // Debug output
-    Serial.print("[Arduino] NG - Kick scheduled at ");
-    Serial.print(kickTime);
-    Serial.print(" (in ");
-    Serial.print(TRAVEL_TIME);
-    Serial.print(" ms) | Queue: ");
+    Serial.print("[Pi Decision] NG → Bottle marked for rejection | Queue: ");
     Serial.println(queueCount);
   } else {
-    // Buffer overflow - this should never happen with proper sizing
-    Serial.println("[ERROR] Kick queue full! Bottle will not be rejected.");
+    Serial.println("[WARNING] Received NG but queue is empty");
   }
 }
 
 // ============================================================================
-// KICK QUEUE PROCESSING
+// KICK EXECUTION
 // ============================================================================
-
-void processKickQueue() {
-  // Check if there are items in the queue
-  if (queueCount > 0) {
-    unsigned long currentTime = millis();
-    unsigned long nextKickTime = kickQueue[queueHead];
-    
-    // Check if it's time to kick
-    // Use >= to handle millis() overflow (happens every ~50 days)
-    if (currentTime >= nextKickTime) {
-      executeKick();
-      
-      // Remove from queue
-      queueHead = (queueHead + 1) % BUFFER_SIZE;
-      queueCount--;
-      
-      Serial.print("[Arduino] Kick executed | Queue remaining: ");
-      Serial.println(queueCount);
-    }
-  }
-}
 
 void executeKick() {
-  // Fast kick motion
+  // MG996R Linear Actuator: Extend rack to block bottle
   rejectServo.write(SERVO_KICK);
   delay(SERVO_KICK_DURATION);
   rejectServo.write(SERVO_IDLE);
   
   // Note: Using delay() here is acceptable because:
-  // 1. Kick duration is very short (150ms)
-  // 2. Pi's AI processing takes much longer (~500ms)
-  // 3. Bottles are spaced apart (>1 second typically)
+  // 1. Conveyor keeps running (relay stays LOW)
+  // 2. Rack blocks bottle for SERVO_KICK_DURATION, bottle falls by inertia
+  // 3. Other bottles wait in queue and will be processed when servo returns
+  
+  Serial.print("[Servo] Kick executed | Queue remaining: ");
+  Serial.println(queueCount);
 }
 
 // ============================================================================
@@ -240,22 +277,28 @@ void executeKick() {
 // ============================================================================
 
 void printStatistics() {
-  Serial.println("--- Statistics ---");
-  Serial.print("Total Detections: ");
+  Serial.println("========== STATISTICS ==========");
+  Serial.print("Total Detections (Sensor 1): ");
   Serial.println(totalDetections);
-  Serial.print("Total Rejections: ");
+  Serial.print("Total Passed (OK):           ");
+  Serial.println(totalPassed);
+  Serial.print("Total Rejected (NG):         ");
   Serial.println(totalRejections);
-  Serial.print("Pass Rate: ");
+  
   if (totalDetections > 0) {
-    float passRate = 100.0 * (totalDetections - totalRejections) / totalDetections;
-    Serial.print(passRate);
+    float passRate = 100.0 * totalPassed / totalDetections;
+    float rejectRate = 100.0 * totalRejections / totalDetections;
+    Serial.print("Pass Rate:                   ");
+    Serial.print(passRate, 1);
     Serial.println("%");
-  } else {
-    Serial.println("N/A");
+    Serial.print("Reject Rate:                 ");
+    Serial.print(rejectRate, 1);
+    Serial.println("%");
   }
-  Serial.print("Current Queue Size: ");
+  
+  Serial.print("Current Queue Size:          ");
   Serial.println(queueCount);
-  Serial.println("------------------");
+  Serial.println("================================");
 }
 
 // ============================================================================
