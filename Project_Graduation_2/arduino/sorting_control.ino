@@ -53,9 +53,10 @@ Servo rejectServo;
 
 // Queue for pending rejections (true = NG pending, false = OK or empty)
 bool pendingRejections[BUFFER_SIZE];
-int queueHead = 0;  // Index to read from (oldest)
-int queueTail = 0;  // Index to write to (newest)
+int queueHead = 0;  // Index to read from (oldest bottle at Sensor 2)
+int queueTail = 0;  // Index to write to (newest bottle at Sensor 1)
 int queueCount = 0; // Number of items in queue
+int decisionIndex = 0; // Index of next bottle waiting for Pi's decision
 
 // Sensor 1 State (Start position)
 bool lastSensor1State = HIGH;
@@ -94,6 +95,7 @@ void setup() {
   for (int i = 0; i < BUFFER_SIZE; i++) {
     pendingRejections[i] = false;
   }
+  decisionIndex = 0;
   
   // Startup Message
   Serial.println("========================================");
@@ -199,14 +201,18 @@ void checkSensor2() {
 void handleServoSensorDetection() {
   // Check if there's a pending rejection at the head of queue
   if (queueCount > 0) {
+    Serial.print("[Sensor 2] Bottle at index ");
+    Serial.print(queueHead);
+    Serial.print(" detected → ");
+    
     if (pendingRejections[queueHead]) {
       // There's a NG bottle waiting → Kick it now!
+      Serial.println("NG → KICKING!");
       executeKick();
-      Serial.println("[Sensor 2] NG bottle detected → KICKED!");
     } else {
       // OK bottle → Let it pass
       totalPassed++;
-      Serial.println("[Sensor 2] OK bottle detected → PASSED");
+      Serial.println("OK → PASSING");
     }
     
     // Remove from queue
@@ -228,28 +234,40 @@ void checkSerial() {
     char decision = Serial.read();
     
     if (decision == 'O') {
-      // OK product - mark most recent entry as OK (already false, so just log)
-      Serial.println("[Pi Decision] OK → Bottle will pass");
+      // OK product - bottle at decisionIndex stays false (OK)
+      if (decisionIndex != queueTail) {
+        Serial.print("[Pi Decision] OK → Bottle at index ");
+        Serial.print(decisionIndex);
+        Serial.println(" will pass");
+        
+        // Move to next bottle waiting for decision
+        decisionIndex = (decisionIndex + 1) % BUFFER_SIZE;
+      } else {
+        Serial.println("[WARNING] Received OK but no bottle waiting for decision");
+      }
     } 
     else if (decision == 'N') {
-      // NG product - mark the most recent entry as pending rejection
+      // NG product - mark bottle at decisionIndex as pending rejection
       markAsRejection();
     }
   }
 }
 
 void markAsRejection() {
-  // Find the most recent entry (queueTail - 1, wrapping if needed)
-  int recentIndex = (queueTail - 1 + BUFFER_SIZE) % BUFFER_SIZE;
-  
-  if (queueCount > 0) {
-    pendingRejections[recentIndex] = true;
+  // Mark the bottle at decisionIndex (next in line waiting for decision)
+  if (decisionIndex != queueTail) {
+    pendingRejections[decisionIndex] = true;
     totalRejections++;
     
-    Serial.print("[Pi Decision] NG → Bottle marked for rejection | Queue: ");
+    Serial.print("[Pi Decision] NG → Bottle at index ");
+    Serial.print(decisionIndex);
+    Serial.print(" marked for rejection | Queue: ");
     Serial.println(queueCount);
+    
+    // Move to next bottle waiting for decision
+    decisionIndex = (decisionIndex + 1) % BUFFER_SIZE;
   } else {
-    Serial.println("[WARNING] Received NG but queue is empty");
+    Serial.println("[WARNING] Received NG but no bottle waiting for decision");
   }
 }
 
