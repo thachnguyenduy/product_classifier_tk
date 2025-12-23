@@ -53,10 +53,15 @@ Servo rejectServo;
 
 // Queue for pending rejections (true = NG pending, false = OK or empty)
 bool pendingRejections[BUFFER_SIZE];
+bool hasDecision[BUFFER_SIZE];  // Track if Pi has sent decision for this bottle
+unsigned long bottleTimestamp[BUFFER_SIZE];  // When bottle was detected at Sensor 1
 int queueHead = 0;  // Index to read from (oldest bottle at Sensor 2)
 int queueTail = 0;  // Index to write to (newest bottle at Sensor 1)
 int queueCount = 0; // Number of items in queue
 int decisionIndex = 0; // Index of next bottle waiting for Pi's decision
+
+// Decision timeout
+const unsigned long DECISION_TIMEOUT = 1000;  // Max 1 second to wait for Pi's decision
 
 // Sensor 1 State (Start position)
 bool lastSensor1State = HIGH;
@@ -94,6 +99,8 @@ void setup() {
   // Initialize queue (all false = no pending rejections)
   for (int i = 0; i < BUFFER_SIZE; i++) {
     pendingRejections[i] = false;
+    hasDecision[i] = false;
+    bottleTimestamp[i] = 0;
   }
   decisionIndex = 0;
   
@@ -158,11 +165,17 @@ void handleBottleDetection(unsigned long detectionTime) {
   
   // Add new entry to queue (initially OK, will be updated when Pi responds)
   if (queueCount < BUFFER_SIZE) {
-    pendingRejections[queueTail] = false;  // Default: OK (no rejection)
+    int currentIndex = queueTail;
+    pendingRejections[currentIndex] = false;  // Default: OK (no rejection)
+    hasDecision[currentIndex] = false;  // No decision yet
+    bottleTimestamp[currentIndex] = detectionTime;  // Record timestamp
+    
     queueTail = (queueTail + 1) % BUFFER_SIZE;
     queueCount++;
     
-    Serial.print("[Sensor 1] Bottle detected → AI triggered | Queue: ");
+    Serial.print("[Sensor 1] Bottle at index ");
+    Serial.print(currentIndex);
+    Serial.print(" detected → AI triggered | Queue: ");
     Serial.println(queueCount);
   } else {
     Serial.println("[ERROR] Queue full! Cannot track bottle.");
@@ -199,14 +212,45 @@ void checkSensor2() {
 }
 
 void handleServoSensorDetection() {
-  // Check if there's a pending rejection at the head of queue
+  // Check if there's a bottle in queue
   if (queueCount > 0) {
     Serial.print("[Sensor 2] Bottle at index ");
     Serial.print(queueHead);
     Serial.print(" detected → ");
     
+    // CRITICAL: Wait for Pi's decision if not received yet
+    if (!hasDecision[queueHead]) {
+      Serial.println("Waiting for Pi decision...");
+      
+      unsigned long waitStart = millis();
+      bool gotDecision = false;
+      
+      // Wait up to DECISION_TIMEOUT for Pi's response
+      while (millis() - waitStart < DECISION_TIMEOUT) {
+        // Check serial for Pi's decision
+        checkSerial();
+        
+        // Check if decision arrived
+        if (hasDecision[queueHead]) {
+          gotDecision = true;
+          Serial.print("  Decision received! → ");
+          break;
+        }
+        
+        delay(10);  // Small delay to prevent CPU overload
+      }
+      
+      // If timeout, assume OK (let pass)
+      if (!gotDecision) {
+        Serial.print("  [TIMEOUT] No decision from Pi → DEFAULT: ");
+        pendingRejections[queueHead] = false;  // Assume OK
+        hasDecision[queueHead] = true;  // Mark as decided
+      }
+    }
+    
+    // Now process the bottle based on decision
     if (pendingRejections[queueHead]) {
-      // There's a NG bottle waiting → Kick it now!
+      // NG bottle → Kick it!
       Serial.println("NG → KICKING!");
       executeKick();
     } else {
@@ -217,6 +261,8 @@ void handleServoSensorDetection() {
     
     // Remove from queue
     pendingRejections[queueHead] = false;
+    hasDecision[queueHead] = false;
+    bottleTimestamp[queueHead] = 0;
     queueHead = (queueHead + 1) % BUFFER_SIZE;
     queueCount--;
   } else {
@@ -236,6 +282,9 @@ void checkSerial() {
     if (decision == 'O') {
       // OK product - bottle at decisionIndex stays false (OK)
       if (decisionIndex != queueTail) {
+        pendingRejections[decisionIndex] = false;  // Mark as OK
+        hasDecision[decisionIndex] = true;  // Decision received!
+        
         Serial.print("[Pi Decision] OK → Bottle at index ");
         Serial.print(decisionIndex);
         Serial.println(" will pass");
@@ -256,7 +305,8 @@ void checkSerial() {
 void markAsRejection() {
   // Mark the bottle at decisionIndex (next in line waiting for decision)
   if (decisionIndex != queueTail) {
-    pendingRejections[decisionIndex] = true;
+    pendingRejections[decisionIndex] = true;  // Mark as NG
+    hasDecision[decisionIndex] = true;  // Decision received!
     totalRejections++;
     
     Serial.print("[Pi Decision] NG → Bottle at index ");
