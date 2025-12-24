@@ -1,59 +1,49 @@
-# ============================================
-# HARDWARE CONTROLLER - Serial Communication
-# ============================================
 """
-Serial communication with Arduino
-
-Protocol:
-- Raspberry Pi sends classification result to Arduino:
-  - 'O' = OK product (servo allows bottle to pass)
-  - 'N' = NG product (servo blocks bottle)
-  - 'S' = Start conveyor
-  - 'P' = Stop/Pause conveyor
-
-- Arduino sends IR sensor trigger to Raspberry Pi:
-  - 'T' = Bottle detected at IR sensor position
-
-IMPORTANT:
-- Classification is sent when bottle CROSSES the virtual line
-- IR sensor detection happens later (physical sensor at servo position)
-- Arduino reads LAST classification received and actuates servo accordingly
+Hardware Communication Handler for Coca-Cola Sorting System (CONTINUOUS MODE)
+Fast serial communication with Arduino for real-time control
 """
 
 import serial
-import threading
 import time
-import config
+import threading
 
 
 class HardwareController:
     """
-    Serial communication with Arduino
-    
-    Responsibilities:
-    - Send classification results ('O' or 'N')
-    - Send conveyor control commands ('S' or 'P')
-    - Receive IR sensor triggers ('T')
-    - Manage serial connection
+    Serial communication handler for Arduino (CONTINUOUS MODE)
+    Optimized for fast response - sends decision immediately after AI
     """
     
-    def __init__(self):
-        self.port = config.ARDUINO_PORT
-        self.baudrate = config.ARDUINO_BAUDRATE
-        self.timeout = config.ARDUINO_TIMEOUT
+    def __init__(self, port="/dev/ttyUSB0", baudrate=9600, timeout=0.1):
+        """
+        Initialize hardware controller
+        
+        Args:
+            port: Serial port
+            baudrate: Communication speed
+            timeout: Read timeout (short for fast response)
+        """
+        self.port = port
+        self.baudrate = baudrate
+        self.timeout = timeout
         
         self.serial = None
         self.connected = False
+        self.lock = threading.Lock()
+        
+        self.detection_callback = None
+        self.listener_thread = None
         self.listening = False
-        self.thread = None
         
-        self.trigger_callback = None
-        self.last_classification = None  # Track last sent classification
-        
-        self._connect()
+        print(f"[Hardware] Initializing on {port} @ {baudrate} baud")
     
-    def _connect(self):
-        """Connect to Arduino"""
+    def connect(self):
+        """
+        Connect to Arduino
+        
+        Returns:
+            bool: True if connected successfully
+        """
         try:
             self.serial = serial.Serial(
                 port=self.port,
@@ -65,208 +55,250 @@ class HardwareController:
             time.sleep(2)
             
             # Clear buffer
-            if self.serial.in_waiting > 0:
-                self.serial.read(self.serial.in_waiting)
+            self.serial.reset_input_buffer()
+            self.serial.reset_output_buffer()
             
             self.connected = True
             print(f"[Hardware] Connected to Arduino on {self.port}")
-            print(f"[Hardware] Baudrate: {self.baudrate}")
+            
             return True
             
         except serial.SerialException as e:
-            print(f"[ERROR] Cannot connect to Arduino: {e}")
-            print(f"[Hardware] Attempted port: {self.port}")
-            print(f"[Hardware] Check connection and port configuration")
+            print(f"[ERROR] Failed to connect to Arduino: {e}")
+            print(f"[INFO] Make sure Arduino is connected to {self.port}")
             self.connected = False
             return False
         except Exception as e:
-            print(f"[ERROR] Hardware init failed: {e}")
+            print(f"[ERROR] Unexpected error connecting to Arduino: {e}")
             self.connected = False
             return False
     
-    def start_listening(self, trigger_callback):
+    def disconnect(self):
+        """Disconnect from Arduino"""
+        self.stop_listening()
+        
+        if self.serial and self.serial.is_open:
+            self.serial.close()
+            print("[Hardware] Disconnected from Arduino")
+        
+        self.connected = False
+    
+    def send_command(self, command):
         """
-        Start listening thread for IR sensor triggers
+        Send command to Arduino (FAST - no waiting)
         
         Args:
-            trigger_callback: Function to call when 'T' received from Arduino
+            command: Single character command ('O' or 'N')
+            
+        Returns:
+            bool: True if sent successfully
         """
         if not self.connected:
-            print("[ERROR] Cannot start listening: Not connected")
-            return False
-        
-        self.trigger_callback = trigger_callback
-        self.listening = True
-        self.thread = threading.Thread(target=self._listen_loop, daemon=True)
-        self.thread.start()
-        print("[Hardware] Listening thread started")
-        return True
-    
-    def _listen_loop(self):
-        """Continuous listening loop"""
-        while self.listening:
-            try:
-                if self.serial.in_waiting > 0:
-                    data = self.serial.read(1).decode('utf-8', errors='ignore')
-                    
-                    if config.VERBOSE_LOGGING:
-                        print(f"[Hardware] Received: '{data}'")
-                    
-                    # IR Sensor triggered
-                    if data == config.CMD_TRIGGER:
-                        print("[Hardware] IR sensor triggered!")
-                        if self.trigger_callback:
-                            self.trigger_callback()
-                
-                time.sleep(0.01)  # Small delay to prevent busy waiting
-                    
-            except Exception as e:
-                if self.listening:  # Only log if still supposed to be listening
-                    print(f"[ERROR] Serial read error: {e}")
-                time.sleep(0.1)
-    
-    def send_classification(self, result):
-        """
-        Send classification result to Arduino
-        
-        Args:
-            result: 'OK' or 'NG'
-        
-        Returns:
-            bool: Success status
-        """
-        if result == 'OK':
-            command = config.CMD_OK
-        elif result == 'NG':
-            command = config.CMD_NG
-        else:
-            print(f"[ERROR] Invalid classification result: {result}")
-            return False
-        
-        success = self._send_command(command)
-        if success:
-            self.last_classification = result
-            print(f"[Hardware] Sent classification: {result} ('{command}')")
-        
-        return success
-    
-    def start_conveyor(self):
-        """Send start conveyor command"""
-        success = self._send_command(config.CMD_START)
-        if success:
-            print("[Hardware] Conveyor START command sent")
-        return success
-    
-    def stop_conveyor(self):
-        """Send stop/pause conveyor command"""
-        success = self._send_command(config.CMD_STOP)
-        if success:
-            print("[Hardware] Conveyor STOP command sent")
-        return success
-    
-    def _send_command(self, cmd):
-        """
-        Send single character command to Arduino
-        
-        Args:
-            cmd: Single character command string
-        
-        Returns:
-            bool: Success status
-        """
-        if not self.connected:
-            print("[ERROR] Cannot send command: Not connected")
+            print("[WARNING] Not connected to Arduino")
             return False
         
         try:
-            self.serial.write(cmd.encode('utf-8'))
-            self.serial.flush()
-            
-            if config.VERBOSE_LOGGING:
-                print(f"[Hardware] Sent command: '{cmd}'")
+            with self.lock:
+                self.serial.write(command.encode())
+                self.serial.flush()  # Ensure immediate transmission
             
             return True
             
         except Exception as e:
-            print(f"[ERROR] Send command failed: {e}")
+            print(f"[ERROR] Failed to send command '{command}': {e}")
             return False
     
-    def stop(self):
-        """Stop listening thread and close connection"""
+    def send_ok(self):
+        """Send OK decision to Arduino"""
+        return self.send_command('O')
+    
+    def send_ng(self):
+        """Send NG decision to Arduino"""
+        return self.send_command('N')
+    
+    def start_listening(self, detection_callback):
+        """
+        Start listening for detection signals from Arduino
+        
+        Args:
+            detection_callback: Function to call when 'D' is received
+        """
+        if self.listening:
+            print("[WARNING] Already listening")
+            return
+        
+        self.detection_callback = detection_callback
+        self.listening = True
+        
+        self.listener_thread = threading.Thread(
+            target=self._listen_loop,
+            daemon=True
+        )
+        self.listener_thread.start()
+        
+        print("[Hardware] Started listening for detections")
+    
+    def stop_listening(self):
+        """Stop listening thread"""
+        if not self.listening:
+            return
+        
+        print("[Hardware] Stopping listener...")
         self.listening = False
         
-        if self.thread is not None:
-            self.thread.join(timeout=2.0)
+        if self.listener_thread:
+            self.listener_thread.join(timeout=2.0)
         
-        if self.serial is not None and self.serial.is_open:
-            self.serial.close()
+        print("[Hardware] Listener stopped")
+    
+    def _listen_loop(self):
+        """
+        Main listening loop (runs in separate thread)
+        Continuously reads serial port for 'D' signals
+        """
+        print("[Hardware] Listener thread started")
         
-        self.connected = False
-        print("[Hardware] Connection closed")
+        buffer = ""
+        
+        while self.listening and self.connected:
+            try:
+                if self.serial.in_waiting > 0:
+                    # Read available data
+                    data = self.serial.read(self.serial.in_waiting).decode('utf-8', errors='ignore')
+                    buffer += data
+                    
+                    # Process complete lines
+                    while '\n' in buffer:
+                        line, buffer = buffer.split('\n', 1)
+                        line = line.strip()
+                        
+                        if line:
+                            self._process_line(line)
+                else:
+                    # No data available, small sleep to prevent CPU overload
+                    time.sleep(0.01)
+                    
+            except Exception as e:
+                print(f"[ERROR] Listener error: {e}")
+                time.sleep(0.1)
+        
+        print("[Hardware] Listener thread stopped")
+    
+    def _process_line(self, line):
+        """
+        Process a line received from Arduino
+        
+        Args:
+            line: String line from serial
+        """
+        # Check for detection signal
+        if line.startswith('D'):
+            # Detection signal received
+            if self.detection_callback:
+                # Parse timestamp if included (format: "D,timestamp")
+                parts = line.split(',')
+                timestamp = int(parts[1]) if len(parts) > 1 else None
+                
+                # Call callback
+                self.detection_callback(timestamp)
+            else:
+                print("[WARNING] Detection received but no callback set")
+        
+        # Print other messages (debug, statistics, etc.)
+        elif line.startswith('[') or line.startswith('-'):
+            # Arduino debug/status messages
+            print(f"[Arduino] {line}")
+        elif "detected" in line.lower() or "decision" in line.lower():
+            # Important messages
+            print(f"[Arduino] {line}")
     
     def is_connected(self):
         """Check if connected to Arduino"""
         return self.connected
+    
+    def is_listening(self):
+        """Check if listening for detections"""
+        return self.listening
 
 
 class DummyHardwareController:
     """
     Dummy hardware controller for testing without Arduino
-    
-    Simulates Arduino behavior for development and testing
+    Simulates detection signals at regular intervals
     """
     
-    def __init__(self):
-        self.connected = True
+    def __init__(self, port="/dev/ttyUSB0", baudrate=9600, timeout=0.1):
+        """Initialize dummy hardware"""
+        print("[Hardware] Initializing DUMMY hardware controller...")
+        
+        self.port = port
+        self.connected = False
         self.listening = False
-        self.trigger_callback = None
-        self.last_classification = None
-        print("[Hardware] Using DUMMY hardware controller")
-        print("[Hardware] No physical Arduino connected")
+        self.detection_callback = None
+        self.simulator_thread = None
     
-    def start_listening(self, trigger_callback):
-        """Start dummy listening (simulates IR triggers)"""
-        self.trigger_callback = trigger_callback
+    def connect(self):
+        """Simulate connection"""
+        self.connected = True
+        print("[Hardware] DUMMY hardware connected")
+        return True
+    
+    def disconnect(self):
+        """Simulate disconnection"""
+        self.stop_listening()
+        self.connected = False
+        print("[Hardware] DUMMY hardware disconnected")
+    
+    def send_command(self, command):
+        """Simulate sending command"""
+        print(f"[Hardware] DUMMY send: {command}")
+        return True
+    
+    def send_ok(self):
+        """Simulate OK"""
+        return self.send_command('O')
+    
+    def send_ng(self):
+        """Simulate NG"""
+        return self.send_command('N')
+    
+    def start_listening(self, detection_callback):
+        """Start simulating detections"""
+        self.detection_callback = detection_callback
         self.listening = True
         
-        # Simulate IR triggers every 5 seconds
-        def simulate_triggers():
-            while self.listening:
-                time.sleep(5)
-                if self.trigger_callback and self.listening:
-                    print("[Hardware] DUMMY: IR sensor triggered!")
-                    self.trigger_callback()
+        self.simulator_thread = threading.Thread(
+            target=self._simulate_detections,
+            daemon=True
+        )
+        self.simulator_thread.start()
         
-        threading.Thread(target=simulate_triggers, daemon=True).start()
-        print("[Hardware] DUMMY: Listening started (triggers every 5s)")
-        return True
+        print("[Hardware] DUMMY listening started (will simulate detections)")
     
-    def send_classification(self, result):
-        """Dummy send classification"""
-        self.last_classification = result
-        if result == 'OK':
-            cmd = config.CMD_OK
-        else:
-            cmd = config.CMD_NG
-        print(f"[Hardware] DUMMY: Classification sent: {result} ('{cmd}')")
-        return True
-    
-    def start_conveyor(self):
-        """Dummy start conveyor"""
-        print("[Hardware] DUMMY: Conveyor STARTED")
-        return True
-    
-    def stop_conveyor(self):
-        """Dummy stop conveyor"""
-        print("[Hardware] DUMMY: Conveyor STOPPED")
-        return True
-    
-    def stop(self):
-        """Dummy stop"""
+    def stop_listening(self):
+        """Stop simulation"""
         self.listening = False
-        self.connected = False
-        print("[Hardware] DUMMY: Stopped")
+        if self.simulator_thread:
+            self.simulator_thread.join(timeout=2.0)
+        print("[Hardware] DUMMY listening stopped")
+    
+    def _simulate_detections(self):
+        """Simulate bottle detections every 3 seconds"""
+        print("[Hardware] DUMMY simulator thread started")
+        
+        while self.listening:
+            time.sleep(3.0)  # Simulate detection every 3 seconds
+            
+            if self.listening and self.detection_callback:
+                print("[Hardware] DUMMY detection simulated")
+                self.detection_callback(None)
+        
+        print("[Hardware] DUMMY simulator thread stopped")
     
     def is_connected(self):
-        """Always connected in dummy mode"""
-        return True
+        """Check dummy connection"""
+        return self.connected
+    
+    def is_listening(self):
+        """Check dummy listening"""
+        return self.listening

@@ -1,47 +1,7 @@
 #!/usr/bin/env python3
-# ============================================
-# COCA-COLA BOTTLE SORTING SYSTEM
-# Main Entry Point
-# ============================================
 """
-Coca-Cola Bottle Sorting System using AI, Line Crossing, and Tkinter UI
-
-Project: Graduation Project
-System: Raspberry Pi 5 (8GB) + Arduino Uno + USB Camera
-Model: YOLO best.pt (NCNN will replace later without changing logic)
-
-Hardware:
-- Raspberry Pi 5: AI inference, tracking, line crossing, database, UI
-- Arduino Uno: IR sensor, servo control, relay control
-- USB Camera: Real-time video capture
-- IR Sensor: Physical bottle detection at servo position
-- Servo 9g: NG bottle blocking
-- Relay 5V: Conveyor belt control
-
-Conveyor Direction: RIGHT → LEFT
-
-Classification Logic:
-1. Continuously track bottles and accumulate detected classes
-2. When bottle crosses virtual line (RIGHT → LEFT):
-   - Finalize classification
-   - Send result to Arduino ('O' = OK, 'N' = NG)
-3. When IR sensor triggers:
-   - Arduino actuates servo based on last received classification
-
-Class Names (EXACT ORDER):
-1. Cap-Defect (NG)
-2. Filling-Defect (NG)
-3. Label-Defect (NG)
-4. Wrong-Product (NG)
-5. cap (required for OK)
-6. coca (identity only, not for classification)
-7. filled (required for OK)
-8. label (required for OK)
-
-Classification Rules:
-- NG if ANY defect detected
-- OK if ALL good classes (cap + label + filled) present AND NO defects
-- Otherwise NG
+Coca-Cola Sorting System - Main Entry Point (CONTINUOUS MODE)
+Continuous conveyor operation with circular buffer queue for rejection timing
 """
 
 import tkinter as tk
@@ -52,30 +12,25 @@ import os
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import config
 from core.camera import Camera, DummyCamera
 from core.ai import AIEngine
 from core.hardware import HardwareController, DummyHardwareController
 from core.database import Database
 from ui.main_window import MainWindow
+import config
 
 
-class SortingSystemApp:
+class ContinuousSortingSystem:
     """
-    Main application class
-    
-    Initializes all components and runs the Tkinter UI
+    Main application class for Continuous Coca-Cola Sorting System
     """
     
     def __init__(self):
-        print("\n" + "="*70)
-        print(" " * 10 + "COCA-COLA BOTTLE SORTING SYSTEM")
-        print(" " * 20 + "Graduation Project")
-        print("="*70)
-        print(f"Version: {config.VERSION}")
-        print(f"Mode: {config.MODE}")
-        print(f"Model: {config.MODEL_PATH_NCNN}")
-        print("="*70 + "\n")
+        """Initialize the application"""
+        print("=" * 70)
+        print("🥤 COCA-COLA SORTING SYSTEM - CONTINUOUS MODE")
+        print("=" * 70)
+        print()
         
         self.root = None
         self.camera = None
@@ -83,156 +38,173 @@ class SortingSystemApp:
         self.hardware = None
         self.database = None
         self.main_window = None
-        
-        self._initialize_components()
-        self._create_ui()
     
-    def _initialize_components(self):
+    def initialize_components(self):
         """Initialize all system components"""
-        print("[Initialization] Starting components...\n")
+        print("[System] Initializing components...")
         
-        # 1. Database
-        print("[1/4] Initializing database...")
         try:
-            self.database = Database()
-            print("✅ Database initialized\n")
-        except Exception as e:
-            print(f"❌ Database initialization failed: {e}\n")
-            raise
-        
-        # 2. AI Engine
-        print("[2/4] Loading AI model...")
-        try:
-            self.ai = AIEngine()
-            print("✅ AI engine loaded\n")
-        except Exception as e:
-            print(f"❌ AI engine failed: {e}\n")
-            raise
-        
-        # 3. Camera
-        print("[3/4] Opening camera...")
-        try:
+            # 1. Initialize Database
+            print("\n[1/4] Initializing database...")
+            self.database = Database(db_path=config.DATABASE_PATH)
+            print("      ✓ Database ready")
+            
+            # 2. Initialize AI Engine
+            print("\n[2/4] Initializing AI engine...")
+            self.ai = AIEngine(model_path=config.MODEL_PATH, config=config)
+            print("      ✓ AI engine ready")
+            
+            # 3. Initialize Camera
+            print("\n[3/4] Initializing camera...")
             if config.USE_DUMMY_CAMERA:
-                self.camera = DummyCamera()
-                print("⚠️ Using DUMMY camera (testing mode)")
+                print("      Using DUMMY camera (testing mode)")
+                self.camera = DummyCamera(
+                    width=config.CAMERA_WIDTH,
+                    height=config.CAMERA_HEIGHT
+                )
             else:
-                self.camera = Camera()
-                if not self.camera.is_opened():
-                    print("❌ Camera failed to open")
-                    raise RuntimeError("Camera not available")
+                self.camera = Camera(
+                    camera_id=config.CAMERA_ID,
+                    width=config.CAMERA_WIDTH,
+                    height=config.CAMERA_HEIGHT,
+                    fps=config.CAMERA_FPS,
+                    exposure=config.CAMERA_EXPOSURE,
+                    auto_exposure=config.CAMERA_AUTO_EXPOSURE
+                )
             
-            self.camera.start()
-            print("✅ Camera started\n")
-        except Exception as e:
-            print(f"❌ Camera initialization failed: {e}\n")
-            raise
-        
-        # 4. Hardware (Arduino)
-        print("[4/4] Connecting to Arduino...")
-        try:
+            if not self.camera.start():
+                print("      [WARNING] Failed to start camera. Switching to dummy mode...")
+                self.camera = DummyCamera(
+                    width=config.CAMERA_WIDTH,
+                    height=config.CAMERA_HEIGHT
+                )
+                self.camera.start()
+            
+            print("      ✓ Camera ready")
+            
+            # 4. Initialize Hardware Controller
+            print("\n[4/4] Initializing hardware controller...")
             if config.USE_DUMMY_HARDWARE:
-                self.hardware = DummyHardwareController()
-                print("⚠️ Using DUMMY hardware (testing mode)")
+                print("      Using DUMMY hardware (testing mode)")
+                self.hardware = DummyHardwareController(
+                    port=config.ARDUINO_PORT,
+                    baudrate=config.ARDUINO_BAUDRATE,
+                    timeout=config.ARDUINO_TIMEOUT
+                )
             else:
-                self.hardware = HardwareController()
-                if not self.hardware.is_connected():
-                    print("⚠️ Arduino not connected")
-                    print(f"   Port: {config.ARDUINO_PORT}")
-                    print(f"   Baudrate: {config.ARDUINO_BAUDRATE}")
-                    print("\nYou can:")
-                    print("  1. Check Arduino connection and port")
-                    print("  2. Continue in DUMMY mode (set USE_DUMMY_HARDWARE = True)")
-                    print("  3. Exit and fix hardware\n")
-                    
-                    response = input("Continue anyway? (y/n): ")
-                    if response.lower() != 'y':
-                        raise RuntimeError("Arduino not connected")
+                self.hardware = HardwareController(
+                    port=config.ARDUINO_PORT,
+                    baudrate=config.ARDUINO_BAUDRATE,
+                    timeout=config.ARDUINO_TIMEOUT
+                )
             
-            print("✅ Hardware initialized\n")
-        except Exception as e:
-            print(f"❌ Hardware initialization failed: {e}\n")
-            raise
-        
-        print("="*70)
-        print("✅ ALL COMPONENTS INITIALIZED SUCCESSFULLY!")
-        print("="*70 + "\n")
-    
-    def _create_ui(self):
-        """Create Tkinter UI"""
-        print("[UI] Creating interface...\n")
-        
-        try:
-            self.root = tk.Tk()
-            self.main_window = MainWindow(
-                self.root,
-                self.camera,
-                self.ai,
-                self.hardware,
-                self.database
-            )
+            if not self.hardware.connect():
+                print("      [WARNING] Failed to connect to Arduino. Switching to dummy mode...")
+                self.hardware = DummyHardwareController(
+                    port=config.ARDUINO_PORT,
+                    baudrate=config.ARDUINO_BAUDRATE,
+                    timeout=config.ARDUINO_TIMEOUT
+                )
+                self.hardware.connect()
             
-            print("✅ UI ready!\n")
+            print("      ✓ Hardware ready")
+            
+            print("\n" + "=" * 70)
+            print("✓ ALL COMPONENTS INITIALIZED SUCCESSFULLY")
+            print("=" * 70)
+            print()
+            
+            return True
+            
         except Exception as e:
-            print(f"❌ UI creation failed: {e}\n")
-            raise
+            print(f"\n[ERROR] Component initialization failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def run(self):
         """Run the application"""
-        print("="*70)
-        print("🚀 SYSTEM READY TO START")
-        print("="*70)
-        print("\nInstructions:")
-        print("1. Click 'START SYSTEM' button in the UI")
-        print("2. Place bottles on conveyor (moving RIGHT → LEFT)")
-        print("3. Bottles will be detected when crossing the cyan line")
-        print("4. Classification result sent to Arduino immediately")
-        print("5. IR sensor triggers servo action at physical position")
-        print("\nClassification Rules:")
-        print("  ✅ OK: All good classes (cap + label + filled) present, no defects")
-        print("  ❌ NG: Any defect OR missing good classes")
-        print("\n" + "="*70 + "\n")
+        print("[System] Starting application...")
+        
+        # Initialize components
+        if not self.initialize_components():
+            print("[ERROR] Failed to initialize components. Exiting...")
+            return
+        
+        # Create Tkinter root
+        self.root = tk.Tk()
+        
+        # Create main window
+        self.main_window = MainWindow(
+            self.root,
+            self.camera,
+            self.ai,
+            self.hardware,
+            self.database
+        )
+        
+        # Handle window close
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Print system info
+        self._print_system_info()
+        
+        # Start Tkinter main loop
+        print("[System] UI ready. Starting main loop...")
+        print()
+        self.root.mainloop()
+    
+    def on_closing(self):
+        """Handle window close event"""
+        print("\n[System] Shutting down...")
         
         try:
-            self.root.mainloop()
-        except KeyboardInterrupt:
-            print("\n[Info] Interrupted by user")
-        finally:
-            self._cleanup()
+            # Stop camera
+            if self.camera:
+                self.camera.stop()
+            
+            # Disconnect hardware
+            if self.hardware:
+                self.hardware.disconnect()
+            
+            # Destroy window
+            if self.root:
+                self.root.destroy()
+            
+            print("[System] Shutdown complete")
+            
+        except Exception as e:
+            print(f"[ERROR] Shutdown error: {e}")
     
-    def _cleanup(self):
-        """Cleanup resources"""
-        print("\n[Cleanup] Shutting down components...\n")
-        
-        if self.camera:
-            self.camera.stop()
-            print("✅ Camera stopped")
-        
-        if self.hardware:
-            self.hardware.stop()
-            print("✅ Hardware disconnected")
-        
-        print("\n" + "="*70)
-        print("✅ CLEANUP COMPLETE - GOODBYE!")
-        print("="*70 + "\n")
+    def _print_system_info(self):
+        """Print system configuration information"""
+        print("\n" + "=" * 70)
+        print("SYSTEM CONFIGURATION")
+        print("=" * 70)
+        print(f"Mode:              CONTINUOUS (No conveyor stopping)")
+        print(f"Travel Time:       {config.TRAVEL_TIME_MS} ms")
+        print(f"Camera:            {config.CAMERA_ID} ({config.CAMERA_WIDTH}x{config.CAMERA_HEIGHT})")
+        print(f"Camera Exposure:   {config.CAMERA_EXPOSURE}")
+        print(f"Arduino Port:      {config.ARDUINO_PORT}")
+        print(f"Model:             {config.MODEL_PATH}")
+        print(f"Confidence:        {config.CONFIDENCE_THRESHOLD}")
+        print(f"NMS Threshold:     {config.NMS_THRESHOLD}")
+        print(f"Debug Mode:        {config.DEBUG_MODE}")
+        print("=" * 70)
+        print()
 
 
 def main():
-    """Main function"""
+    """Main entry point"""
     try:
-        app = SortingSystemApp()
+        app = ContinuousSortingSystem()
         app.run()
     except KeyboardInterrupt:
-        print("\n\n[Info] Program interrupted by user")
-        sys.exit(0)
+        print("\n[System] Interrupted by user")
     except Exception as e:
-        print("\n" + "="*70)
-        print("❌ FATAL ERROR")
-        print("="*70)
-        print(f"Error: {e}\n")
+        print(f"\n[ERROR] Application error: {e}")
         import traceback
         traceback.print_exc()
-        print("\n" + "="*70)
-        sys.exit(1)
 
 
 if __name__ == "__main__":

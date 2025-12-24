@@ -1,290 +1,225 @@
-# ============================================
-# AI ENGINE - NCNN OPTIMIZED for Raspberry Pi 5
-# ============================================
 """
-AI Engine tối ưu cho Raspberry Pi 5 sử dụng NCNN
-
-PERFORMANCE OPTIMIZATIONS:
-- NCNN inference (5-10x faster than YOLO PyTorch)
-- Efficient tracking with spatial indexing
-- Reduced memory allocations
-- Optimized detection grouping
-
-CLASSIFICATION RULES (EXACT):
-1. NG if ANY defect class detected
-2. OK if ALL good classes (cap + label + filled) detected AND NO defects
-3. "coca" class is ONLY for identity, NOT for classification
+AI Engine for Coca-Cola Sorting System (CONTINUOUS MODE)
+Uses NCNN for fast inference with proper NMS to handle overlapping boxes
 """
 
 import cv2
 import numpy as np
 import time
 import os
-import re
-import config
+from pathlib import Path
 
-
-# Import NCNN
 try:
     import ncnn
     NCNN_AVAILABLE = True
 except ImportError:
-    print("[ERROR] NCNN not available. Install: pip3 install ncnn")
     NCNN_AVAILABLE = False
-
-
-class TrackedObject:
-    """Tracked bottle object"""
-    __slots__ = ['object_id', 'x_center', 'y_center', 'detected_classes', 
-                 'bbox', 'last_seen', 'crossed', 'classification_result', 
-                 'classification_reason']
-    
-    def __init__(self, object_id, x_center, y_center):
-        self.object_id = object_id
-        self.x_center = x_center
-        self.y_center = y_center
-        self.detected_classes = set()
-        self.bbox = None
-        self.last_seen = time.time()
-        self.crossed = False
-        self.classification_result = None
-        self.classification_reason = ""
-    
-    def update_position(self, x_center, y_center, bbox=None):
-        """Update position"""
-        self.x_center = x_center
-        self.y_center = y_center
-        if bbox is not None:
-            self.bbox = bbox
-        self.last_seen = time.time()
-    
-    def add_detected_class(self, class_name):
-        """Add detected class"""
-        self.detected_classes.add(class_name)
-    
-    def finalize_classification(self):
-        """
-        Finalize classification at line crossing
-        
-        Rules (STRICT):
-        - If ANY defect → NG
-        - If ALL good classes present AND NO defects → OK
-        - Otherwise → NG
-        """
-        # Check defects
-        defect_classes = {'Cap-Defect', 'Filling-Defect', 'Label-Defect', 'Wrong-Product'}
-        detected_defects = self.detected_classes & defect_classes
-        
-        if detected_defects:
-            self.classification_result = 'NG'
-            self.classification_reason = f"Defect: {', '.join(detected_defects)}"
-            return
-        
-        # Check good classes
-        required_good = {'cap', 'label', 'filled'}
-        has_all_good = required_good.issubset(self.detected_classes)
-        
-        if has_all_good:
-            self.classification_result = 'OK'
-            self.classification_reason = "All components OK"
-        else:
-            missing = required_good - self.detected_classes
-            self.classification_result = 'NG'
-            self.classification_reason = f"Missing: {', '.join(missing)}"
+    print("[WARNING] NCNN not available. Install with: pip install ncnn")
 
 
 class AIEngine:
     """
-    NCNN-based AI Engine optimized for Raspberry Pi 5
-    
-    Performance features:
-    - NCNN inference (much faster than PyTorch)
-    - Efficient object tracking
-    - Reduced memory allocations
-    - Optimized detection processing
+    AI Engine using NCNN model for bottle inspection
+    Implements proper NMS using cv2.dnn.NMSBoxes
     """
     
-    def __init__(self):
-        print("[AI] Initializing NCNN model for Raspberry Pi 5...")
+    def __init__(self, model_path="model/best_ncnn_model", config=None):
+        """
+        Initialize AI Engine
         
-        if not NCNN_AVAILABLE:
-            raise RuntimeError("NCNN not available")
+        Args:
+            model_path: Path to NCNN model folder
+            config: Configuration module (optional)
+        """
+        print("[AI] Initializing AI Engine...")
         
-        # Model paths
-        self.model_path = config.MODEL_PATH_NCNN
-        self.param_file = os.path.join(self.model_path, config.MODEL_PARAM)
-        self.bin_file = os.path.join(self.model_path, config.MODEL_BIN)
-        
-        # Configuration
-        self.input_size = config.INPUT_SIZE
-        self.conf_threshold = config.CONFIDENCE_THRESHOLD
-        self.nms_threshold = config.NMS_THRESHOLD
-        self.class_names = config.CLASS_NAMES
-        self.num_classes = len(self.class_names)
-        
-        # NCNN network
+        self.model_path = model_path
         self.net = None
-        # Fixed blob names from param file (line 3 and 204)
-        self.input_blob_name = "in0"   # Input blob
-        self.output_blob_name = "out0"  # Output blob
+        self.model_loaded = False
+        
+        # Load configuration
+        if config is None:
+            try:
+                import config as cfg
+                self.config = cfg
+            except ImportError:
+                print("[WARNING] config.py not found, using defaults")
+                self.config = None
+        else:
+            self.config = config
+        
+        # Get configuration values
+        self.confidence_threshold = getattr(self.config, 'CONFIDENCE_THRESHOLD', 0.5)
+        self.nms_threshold = getattr(self.config, 'NMS_THRESHOLD', 0.45)
+        self.class_names = getattr(self.config, 'CLASS_NAMES', [
+            'Cap-Defect', 'Filling-Defect', 'Label-Defect', 'Wrong-Product',
+            'cap', 'coca', 'filled', 'label'
+        ])
+        self.defect_classes = getattr(self.config, 'DEFECT_CLASSES', [0, 1, 2, 3])
+        self.required_components = getattr(self.config, 'REQUIRED_COMPONENTS', {
+            'cap': 4, 'filled': 6, 'label': 7
+        })
+        self.require_cap = getattr(self.config, 'REQUIRE_CAP', True)
+        self.require_filled = getattr(self.config, 'REQUIRE_FILLED', True)
+        self.require_label = getattr(self.config, 'REQUIRE_LABEL', True)
+        self.debug_mode = getattr(self.config, 'DEBUG_MODE', True)
+        self.save_debug_images = getattr(self.config, 'SAVE_DEBUG_IMAGES', True)
+        
+        # Model parameters
+        self.input_size = 640
         
         # Load model
-        self._load_ncnn_model()
-        
-        # Tracking
-        self.tracked_objects = {}
-        self.next_object_id = 0
-        self.max_distance = 100
-        self.object_timeout = 3.0
-        
-        # Virtual line
-        self.virtual_line_x = config.VIRTUAL_LINE_X
-        
-        print(f"[AI] NCNN model loaded successfully")
-        print(f"[AI] Input size: {self.input_size}x{self.input_size}")
-        print(f"[AI] Classes: {self.num_classes}")
+        if NCNN_AVAILABLE:
+            self._load_ncnn_model()
+        else:
+            print("[WARNING] NCNN not available, using dummy predictions")
     
     def _load_ncnn_model(self):
-        """Load NCNN model"""
+        """Load NCNN model from .param and .bin files"""
         try:
-            # Check files exist
-            if not os.path.exists(self.param_file):
-                raise FileNotFoundError(f"Param file not found: {self.param_file}")
-            if not os.path.exists(self.bin_file):
-                raise FileNotFoundError(f"Bin file not found: {self.bin_file}")
+            param_path = os.path.join(self.model_path, "model.ncnn.param")
+            bin_path = os.path.join(self.model_path, "model.ncnn.bin")
             
-            # Create NCNN network
+            if not os.path.exists(param_path) or not os.path.exists(bin_path):
+                print(f"[ERROR] Model files not found at {self.model_path}")
+                print(f"  Expected: {param_path}")
+                print(f"  Expected: {bin_path}")
+                return
+            
             self.net = ncnn.Net()
-            self.net.opt.use_vulkan_compute = False  # Disable Vulkan for stability
-            self.net.opt.num_threads = 4  # Use 4 threads on Pi 5
-            self.net.opt.use_fp16_storage = False  # Use FP32
+            self.net.load_param(param_path)
+            self.net.load_model(bin_path)
             
-            # Load model files
-            ret_param = self.net.load_param(self.param_file)
-            if ret_param != 0:
-                raise RuntimeError(f"Failed to load param file (code={ret_param})")
-            
-            ret_bin = self.net.load_model(self.bin_file)
-            if ret_bin != 0:
-                raise RuntimeError(f"Failed to load bin file (code={ret_bin})")
-            
-            print(f"[AI] NCNN model loaded successfully")
-            print(f"[AI] Input blob: '{self.input_blob_name}'")
-            print(f"[AI] Output blob: '{self.output_blob_name}'")
+            self.model_loaded = True
+            print(f"[AI] NCNN model loaded successfully from {self.model_path}")
+            print(f"[AI] Confidence threshold: {self.confidence_threshold}")
+            print(f"[AI] NMS threshold: {self.nms_threshold}")
             
         except Exception as e:
             print(f"[ERROR] Failed to load NCNN model: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
+            self.model_loaded = False
     
-    def _detect_blob_names(self):
-        """Auto-detect blob names from param file"""
-        with open(self.param_file, 'r') as f:
-            lines = f.readlines()
-        
-        # Find input blob
-        for line in lines:
-            if line.startswith('Input'):
-                parts = line.split()
-                if len(parts) >= 3:
-                    self.input_blob_name = parts[2]
-                    break
-        
-        # Find output blob
-        for line in lines:
-            if 'out0' in line or 'output0' in line:
-                if 'out0' in line:
-                    self.output_blob_name = 'out0'
-                elif 'output0' in line:
-                    self.output_blob_name = 'output0'
-                break
-    
-    def predict_and_track(self, frame):
+    def predict(self, frame):
         """
-        Run NCNN detection and tracking (SIMPLIFIED FOR SPEED)
+        Run inference on a single frame (FAST - for continuous mode)
         
+        Args:
+            frame: BGR image from camera
+            
         Returns:
-            dict with detections, tracked_objects, crossed_objects
+            dict with keys:
+                - result: 'OK' or 'NG'
+                - reason: Explanation string
+                - detections: List of detected objects
+                - annotated_image: Frame with bounding boxes
+                - processing_time: Time in seconds
         """
-        # Preprocess (nhanh)
-        mat_in = self._preprocess(frame)
+        start_time = time.time()
         
-        # Run inference (nhanh nhất)
-        detections = self._run_inference(mat_in, frame.shape[1], frame.shape[0])
+        if not self.model_loaded or not NCNN_AVAILABLE:
+            return self._dummy_prediction(frame)
         
-        # Update tracking (đơn giản hơn)
-        crossed_objects = self._update_tracking(detections)
-        
-        return {
-            'detections': detections,
-            'tracked_objects': self.tracked_objects,
-            'crossed_objects': crossed_objects
-        }
-    
-    def _preprocess(self, frame):
-        """Preprocess frame for NCNN (OPTIMIZED)"""
-        # Resize once
-        resized = cv2.resize(frame, (self.input_size, self.input_size), 
-                            interpolation=cv2.INTER_LINEAR)
-        
-        # Convert to NCNN Mat (optimized path)
-        mat_in = ncnn.Mat.from_pixels(
-            resized,
-            ncnn.Mat.PixelType.PIXEL_BGR,
-            self.input_size,
-            self.input_size
-        )
-        
-        # Normalize (faster than substract_mean_normalize for constants)
-        mean_vals = [0, 0, 0]
-        norm_vals = [1.0/255.0, 1.0/255.0, 1.0/255.0]
-        mat_in.substract_mean_normalize(mean_vals, norm_vals)
-        
-        return mat_in
-    
-    def _run_inference(self, mat_in, orig_w, orig_h):
-        """Run NCNN inference (OPTIMIZED)"""
         try:
-            # Create extractor
-            # Note: Vulkan setting is already configured at network level
-            # self.net.opt.use_vulkan_compute = False (in __init__)
-            ex = self.net.create_extractor()
+            # Preprocess
+            img_h, img_w = frame.shape[:2]
+            preprocessed = self._preprocess(frame)
             
-            # Input
-            ret_input = ex.input(self.input_blob_name, mat_in)
-            if ret_input != 0:
-                print(f"[ERROR] Input failed (code={ret_input})")
-                return []
+            # Run inference
+            detections = self._run_ncnn_inference(preprocessed, img_w, img_h)
             
-            # Extract output
-            ret, mat_out = ex.extract(self.output_blob_name)
-            if ret != 0:
-                print(f"[ERROR] Extract failed (code={ret})")
-                return []
-            
-            # Decode detections
-            detections = self._decode_yolo_output(mat_out, orig_w, orig_h)
-            
-            # Apply NMS
+            # Apply NMS using cv2.dnn.NMSBoxes
             detections = self._apply_nms(detections)
             
-            return detections
+            # Apply sorting logic
+            result_dict = self._apply_sorting_logic(detections)
+            
+            # Draw bounding boxes
+            annotated_image = self._draw_boxes(frame.copy(), detections)
+            
+            # Add metadata
+            processing_time = time.time() - start_time
+            result_dict['annotated_image'] = annotated_image
+            result_dict['processing_time'] = processing_time
+            
+            if self.debug_mode:
+                print(f"[AI] Prediction: {result_dict['result']} | "
+                      f"Reason: {result_dict['reason']} | "
+                      f"Time: {processing_time*1000:.1f}ms")
+            
+            return result_dict
             
         except Exception as e:
-            print(f"[ERROR] Inference failed: {e}")
+            print(f"[ERROR] Prediction failed: {e}")
             import traceback
             traceback.print_exc()
-            return []
+            return self._dummy_prediction(frame)
     
-    def _decode_yolo_output(self, output, img_w, img_h):
+    def _preprocess(self, frame):
         """
-        Decode NCNN output - COPY TỪ PROJECT_GRADUATION (HOẠT ĐỘNG)
+        Preprocess frame for NCNN inference
         
-        YOLOv8 NCNN format:
-        - Shape: (num_detections, 4+num_classes) hoặc (4+num_classes, num_detections)
-        - Format: [x_center, y_center, width, height, class0_score, class1_score, ...]
-        - Coordinates: Scaled to input_size (0-640), NOT normalized (0-1)
+        Args:
+            frame: BGR image
+            
+        Returns:
+            ncnn.Mat object
+        """
+        # Resize to model input size
+        resized = cv2.resize(frame, (self.input_size, self.input_size))
+        
+        # Convert BGR to RGB
+        rgb = cv2.cvtColor(resized, cv2.COLOR_BGR2RGB)
+        
+        # Create NCNN Mat
+        mat = ncnn.Mat.from_pixels(rgb, ncnn.Mat.PixelType.PIXEL_RGB, 
+                                    self.input_size, self.input_size)
+        
+        # Normalize (0-1)
+        mean_vals = []
+        norm_vals = [1/255.0, 1/255.0, 1/255.0]
+        mat.substract_mean_normalize(mean_vals, norm_vals)
+        
+        return mat
+    
+    def _run_ncnn_inference(self, mat, img_w, img_h):
+        """
+        Run NCNN inference
+        
+        Args:
+            mat: Preprocessed ncnn.Mat
+            img_w: Original image width
+            img_h: Original image height
+            
+        Returns:
+            List of detections (before NMS)
+        """
+        # Create extractor
+        ex = self.net.create_extractor()
+        ex.input("in0", mat)
+        
+        # Extract output
+        ret, out = ex.extract("out0")
+        
+        if ret != 0:
+            print(f"[ERROR] NCNN extraction failed with code {ret}")
+            return []
+        
+        # Parse output
+        detections = self._parse_ncnn_output(out, img_w, img_h)
+        
+        return detections
+    
+    def _parse_ncnn_output(self, output, img_w, img_h):
+        """
+        Parse NCNN output tensor into detections
+        
+        Args:
+            output: ncnn.Mat output
+            img_w: Original image width
+            img_h: Original image height
+            
+        Returns:
+            List of detection dicts
         """
         detections = []
         
@@ -292,7 +227,7 @@ class AIEngine:
             # Convert ncnn.Mat to numpy array
             output_np = np.array(output)
             
-            if config.DEBUG_MODE:
+            if self.debug_mode:
                 print(f"[AI] NCNN output shape: {output_np.shape}")
             
             # Handle batch dimension
@@ -303,7 +238,7 @@ class AIEngine:
             # If shape[0] < shape[1], it means we need to transpose
             if output_np.shape[0] < output_np.shape[1]:
                 output_np = output_np.T
-                if config.DEBUG_MODE:
+                if self.debug_mode:
                     print(f"[AI] Transposed to: {output_np.shape}")
             
             num_detections = output_np.shape[0]
@@ -325,7 +260,6 @@ class AIEngine:
                 
                 # YOLOv8 format: [x_center, y_center, width, height, class1_score, class2_score, ...]
                 # Coordinates are in input_size scale (0-640), not normalized (0-1)
-                # SCALE NGAY KHI ĐỌC (QUAN TRỌNG!)
                 x_center = detection[0] * scale_x
                 y_center = detection[1] * scale_y
                 width = detection[2] * scale_x
@@ -339,7 +273,7 @@ class AIEngine:
                 confidence = float(class_scores[class_id])
                 
                 # Filter by confidence
-                if confidence > self.conf_threshold:
+                if confidence > self.confidence_threshold:
                     # Convert to corner format
                     x1 = int(x_center - width / 2)
                     y1 = int(y_center - height / 2)
@@ -362,216 +296,208 @@ class AIEngine:
                         })
                         
                         # Debug first detection
-                        if config.DEBUG_MODE and len(detections) == 1:
+                        if self.debug_mode and len(detections) == 1:
                             print(f"[AI] First detection: {self.class_names[class_id]} "
                                   f"at ({x1},{y1})-({x2},{y2}), conf={confidence:.2f}")
-            
-            if config.DEBUG_MODE:
-                print(f"[AI] Total detections: {len(detections)}")
         
         except Exception as e:
             print(f"[ERROR] Parse NCNN output failed: {e}")
-            if config.DEBUG_MODE:
+            if self.debug_mode:
                 import traceback
                 traceback.print_exc()
         
         return detections
-
     
     def _apply_nms(self, detections):
-        """Apply NMS (OPTIMIZED - SIMPLIFIED)"""
-        if len(detections) <= 1:
-            return detections
+        """
+        Apply Non-Maximum Suppression using cv2.dnn.NMSBoxes
         
-        # Chỉ apply NMS nếu có nhiều detections (tăng tốc)
-        boxes = []
-        confidences = []
-        
-        for det in detections:
-            x1, y1, x2, y2 = det['bbox']
-            boxes.append([x1, y1, x2 - x1, y2 - y1])
-            confidences.append(det['confidence'])
-        
-        # OpenCV NMS (fast)
-        indices = cv2.dnn.NMSBoxes(
-            boxes,
-            confidences,
-            self.conf_threshold,
-            self.nms_threshold
-        )
-        
-        if len(indices) > 0:
-            return [detections[i] for i in indices.flatten()]
-        
-        return []
-    
-    def _update_tracking(self, detections):
-        """Update tracking (OPTIMIZED)"""
-        current_time = time.time()
-        crossed_objects = []
-        
-        # Clean old objects
-        self.tracked_objects = {
-            obj_id: obj for obj_id, obj in self.tracked_objects.items()
-            if current_time - obj.last_seen < self.object_timeout
-        }
-        
-        # Group detections
-        detection_groups = self._group_detections_by_position(detections)
-        
-        # Match to existing objects
-        matched_detections = set()
-        
-        for obj_id, tracked_obj in list(self.tracked_objects.items()):
-            if tracked_obj.crossed:
-                continue
+        Args:
+            detections: List of detection dicts
             
-            # Find closest group (optimized distance calculation)
-            best_match = None
-            min_distance = self.max_distance
-            
-            for i, group in enumerate(detection_groups):
-                if i in matched_detections:
-                    continue
-                
-                # Fast distance calculation
-                dx = group['center'][0] - tracked_obj.x_center
-                dy = group['center'][1] - tracked_obj.y_center
-                distance = dx*dx + dy*dy  # Skip sqrt for comparison
-                
-                if distance < min_distance * min_distance:
-                    min_distance = distance ** 0.5
-                    best_match = i
-            
-            if best_match is not None:
-                matched_detections.add(best_match)
-                group = detection_groups[best_match]
-                
-                prev_x = tracked_obj.x_center
-                
-                # Update
-                tracked_obj.update_position(
-                    group['center'][0],
-                    group['center'][1],
-                    group['bbox']
-                )
-                
-                # Add classes
-                for det in group['detections']:
-                    tracked_obj.add_detected_class(det['class_name'])
-                
-                # Check crossing
-                if not tracked_obj.crossed:
-                    if prev_x > self.virtual_line_x and tracked_obj.x_center <= self.virtual_line_x:
-                        tracked_obj.crossed = True
-                        tracked_obj.finalize_classification()
-                        crossed_objects.append(tracked_obj)
-                        
-                        if config.DEBUG_MODE:
-                            print(f"[AI] Object #{obj_id} CROSSED | {tracked_obj.classification_result}")
-        
-        # Create new objects
-        for i, group in enumerate(detection_groups):
-            if i not in matched_detections:
-                if group['center'][0] > self.virtual_line_x:
-                    new_obj = TrackedObject(
-                        self.next_object_id,
-                        group['center'][0],
-                        group['center'][1]
-                    )
-                    new_obj.bbox = group['bbox']
-                    
-                    for det in group['detections']:
-                        new_obj.add_detected_class(det['class_name'])
-                    
-                    self.tracked_objects[self.next_object_id] = new_obj
-                    self.next_object_id += 1
-        
-        return crossed_objects
-    
-    def _group_detections_by_position(self, detections):
-        """Group nearby detections (OPTIMIZED)"""
+        Returns:
+            Filtered list of detections
+        """
         if len(detections) == 0:
             return []
         
-        groups = []
-        used = set()
+        # Prepare data for NMS
+        boxes = []
+        confidences = []
+        class_ids = []
         
-        for i, det1 in enumerate(detections):
-            if i in used:
-                continue
-            
-            x1, y1, x2, y2 = det1['bbox']
-            cx1 = (x1 + x2) * 0.5
-            cy1 = (y1 + y2) * 0.5
-            
-            group_detections = [det1]
-            group_boxes = [[x1, y1, x2, y2]]
-            used.add(i)
-            
-            # Find nearby
-            for j, det2 in enumerate(detections):
-                if j in used:
-                    continue
-                
-                x1_2, y1_2, x2_2, y2_2 = det2['bbox']
-                cx2 = (x1_2 + x2_2) * 0.5
-                cy2 = (y1_2 + y2_2) * 0.5
-                
-                # Fast distance
-                dx = cx1 - cx2
-                dy = cy1 - cy2
-                if dx*dx + dy*dy < 10000:  # 100^2
-                    group_detections.append(det2)
-                    group_boxes.append([x1_2, y1_2, x2_2, y2_2])
-                    used.add(j)
-            
-            # Compute group bbox (vectorized)
-            boxes_np = np.array(group_boxes)
-            group_bbox = [
-                int(np.min(boxes_np[:, 0])),
-                int(np.min(boxes_np[:, 1])),
-                int(np.max(boxes_np[:, 2])),
-                int(np.max(boxes_np[:, 3]))
-            ]
-            
-            group_center = [
-                (group_bbox[0] + group_bbox[2]) * 0.5,
-                (group_bbox[1] + group_bbox[3]) * 0.5
-            ]
-            
-            groups.append({
-                'detections': group_detections,
-                'bbox': group_bbox,
-                'center': group_center
-            })
+        for det in detections:
+            x1, y1, x2, y2 = det['bbox']
+            # cv2.dnn.NMSBoxes expects [x, y, width, height]
+            boxes.append([x1, y1, x2 - x1, y2 - y1])
+            confidences.append(float(det['confidence']))
+            class_ids.append(det['class_id'])
         
-        return groups
+        # Apply NMS
+        indices = cv2.dnn.NMSBoxes(
+            boxes,
+            confidences,
+            self.confidence_threshold,
+            self.nms_threshold
+        )
+        
+        # Filter detections
+        if len(indices) > 0:
+            # indices is a list of lists in OpenCV 4.x
+            if isinstance(indices, tuple):
+                indices = indices[0] if len(indices) > 0 else []
+            
+            # Flatten if needed
+            if len(indices) > 0 and isinstance(indices[0], (list, np.ndarray)):
+                indices = [i[0] if isinstance(i, (list, np.ndarray)) else i for i in indices]
+            
+            filtered_detections = [detections[i] for i in indices]
+        else:
+            filtered_detections = []
+        
+        if self.debug_mode and len(detections) != len(filtered_detections):
+            print(f"[AI] NMS: {len(detections)} -> {len(filtered_detections)} detections")
+        
+        return filtered_detections
     
-    def draw_tracking(self, frame, tracked_objects_dict):
-        """Draw tracking (OPTIMIZED - minimal operations)"""
-        for obj_id, obj in tracked_objects_dict.items():
-            if obj.bbox is None:
-                continue
-            
-            x1, y1, x2, y2 = obj.bbox
-            
-            # Color
-            if obj.crossed:
-                color = (0, 255, 0) if obj.classification_result == 'OK' else (0, 0, 255)
-            else:
-                color = (255, 255, 0)
-            
-            # Draw box (single call)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            
-            # Draw ID (minimal text)
-            cv2.putText(frame, f"#{obj_id}", (x1, y1 - 5),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
-            
-            # Draw result if crossed
-            if obj.crossed and obj.classification_result:
-                cv2.putText(frame, obj.classification_result, (x1, y2 + 15),
-                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+    def _apply_sorting_logic(self, detections):
+        """
+        Apply sorting logic based on detections
         
-        return frame
+        Args:
+            detections: List of detection dicts
+            
+        Returns:
+            dict with result and reason
+        """
+        # Check for defects
+        defects_found = []
+        for det in detections:
+            if det['class_id'] in self.defect_classes:
+                defects_found.append(det['class_name'])
+        
+        # Check for required components
+        has_cap = any(det['class_id'] == self.required_components['cap'] for det in detections)
+        has_filled = any(det['class_id'] == self.required_components['filled'] for det in detections)
+        has_label = any(det['class_id'] == self.required_components['label'] for det in detections)
+        
+        if self.debug_mode:
+            print(f"[AI] Components: cap={has_cap}, filled={has_filled}, label={has_label}")
+            if defects_found:
+                print(f"[AI] Defects: {defects_found}")
+        
+        # RULE 1: Any defect -> NG
+        if defects_found:
+            return {
+                'result': 'NG',
+                'reason': f'Defect: {", ".join(defects_found)}',
+                'detections': detections,
+                'has_cap': has_cap,
+                'has_filled': has_filled,
+                'has_label': has_label,
+                'defects_found': defects_found
+            }
+        
+        # RULE 2: Missing required components -> NG
+        missing = []
+        if self.require_cap and not has_cap:
+            missing.append('cap')
+        if self.require_filled and not has_filled:
+            missing.append('filled')
+        if self.require_label and not has_label:
+            missing.append('label')
+        
+        if missing:
+            return {
+                'result': 'NG',
+                'reason': f'Missing: {", ".join(missing)}',
+                'detections': detections,
+                'has_cap': has_cap,
+                'has_filled': has_filled,
+                'has_label': has_label,
+                'defects_found': []
+            }
+        
+        # RULE 3: All good -> OK
+        return {
+            'result': 'OK',
+            'reason': 'All components present, no defects',
+            'detections': detections,
+            'has_cap': has_cap,
+            'has_filled': has_filled,
+            'has_label': has_label,
+            'defects_found': []
+        }
+    
+    def _draw_boxes(self, image, detections):
+        """
+        Draw bounding boxes on image
+        
+        Args:
+            image: BGR image
+            detections: List of detection dicts
+            
+        Returns:
+            Annotated image
+        """
+        for det in detections:
+            x1, y1, x2, y2 = det['bbox']
+            class_name = det['class_name']
+            confidence = det['confidence']
+            
+            # Color: Red for defects, Green for components
+            if det['class_id'] in self.defect_classes:
+                color = (0, 0, 255)  # Red
+            else:
+                color = (0, 255, 0)  # Green
+            
+            # Draw box
+            cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
+            
+            # Draw label
+            label = f"{class_name} {confidence:.2f}"
+            label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+            
+            # Background for text
+            cv2.rectangle(image, 
+                         (x1, y1 - label_size[1] - 4),
+                         (x1 + label_size[0], y1),
+                         color, -1)
+            
+            # Text
+            cv2.putText(image, label, (x1, y1 - 2),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        return image
+    
+    def _dummy_prediction(self, frame):
+        """
+        Dummy prediction for testing without NCNN
+        
+        Args:
+            frame: BGR image
+            
+        Returns:
+            Dummy result dict
+        """
+        import random
+        
+        result = 'OK' if random.random() > 0.3 else 'NG'
+        reason = 'Dummy prediction (NCNN not available)'
+        
+        # Draw text on frame
+        annotated = frame.copy()
+        cv2.putText(annotated, f"DUMMY MODE: {result}", (10, 30),
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+        
+        return {
+            'result': result,
+            'reason': reason,
+            'detections': [],
+            'annotated_image': annotated,
+            'processing_time': 0.05,
+            'has_cap': True,
+            'has_filled': True,
+            'has_label': True,
+            'defects_found': []
+        }

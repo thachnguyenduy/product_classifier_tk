@@ -1,371 +1,269 @@
-# Quick Start Guide
-## Coca-Cola Bottle Sorting System
+# ⚡ Quick Start Guide - Continuous Sorting System
+
+Get your system running in 5 minutes!
+
+## 📦 Prerequisites
+
+- Raspberry Pi 5 (or Pi 4) with Raspberry Pi OS
+- Arduino Uno with uploaded code
+- USB Camera connected
+- Hardware assembled (IR sensor, relay, servo)
 
 ---
 
-## ⚡ 5-Minute Setup
+## 🚀 Installation (3 Steps)
 
-### 1. Hardware Connection
-
-```
-┌─────────────────┐
-│  Raspberry Pi 5 │
-│     (8GB)       │
-└────┬──────┬─────┘
-     │      │
-     │      └─────────────┐
-     │                    │
-┌────▼─────┐      ┌──────▼──────┐
-│USB Camera│      │Arduino Uno  │
-└──────────┘      └─┬────┬────┬─┘
-                    │    │    │
-              ┌─────┘    │    └──────┐
-              │          │           │
-          ┌───▼──┐   ┌──▼───┐   ┌──▼───┐
-          │IR    │   │Servo │   │Relay │
-          │Sensor│   │(Pin9)│   │(Pin4)│
-          │(Pin2)│   └──────┘   └──┬───┘
-          └──────┘                 │
-                              ┌────▼────┐
-                              │Conveyor │
-                              │  Belt   │
-                              └─────────┘
-```
-
-### 2. Software Installation
+### Step 1: Install Dependencies
 
 ```bash
-cd Project_Graduation_3
+# Update system
+sudo apt update
+
+# Install Python packages
+pip3 install opencv-python numpy Pillow pyserial ncnn
+
+# Or use requirements file
 pip3 install -r requirements.txt
 ```
 
-### 3. Configure Arduino Port
+### Step 2: Configure System
 
-```bash
-# Find Arduino port
-ls /dev/ttyUSB*
+Edit `config.py`:
 
-# Edit config.py
-nano config.py
-# Change: ARDUINO_PORT = '/dev/ttyUSB0'
+```python
+# CRITICAL: Set your travel time (measure physically!)
+TRAVEL_TIME_MS = 4500  # Adjust to your setup
+
+# Set Arduino port
+ARDUINO_PORT = '/dev/ttyUSB0'  # or '/dev/ttyACM0'
+
+# Set camera
+CAMERA_ID = 0
+CAMERA_EXPOSURE = -4  # Adjust for lighting
 ```
 
-### 4. Upload Arduino Code
+### Step 3: Upload Arduino Code
 
-1. Open Arduino IDE
-2. Open `arduino/arduino.ino`
-3. Select Board: Arduino Uno
-4. Select Port: /dev/ttyUSB0
-5. Click Upload
+1. Open `arduino/sorting_control.ino`
+2. Set `TRAVEL_TIME = 4500;` (line 28) to match your config
+3. Upload to Arduino
 
-### 5. Run System
+---
+
+## ▶️ Run System
 
 ```bash
 python3 main.py
 ```
 
----
+Or use the startup script:
 
-## 🎮 How to Use
-
-### Step 1: Start System
-1. Click **"START SYSTEM"** button
-2. Conveyor will start automatically
-3. Green status bar shows "RUNNING"
-
-### Step 2: Place Bottles
-- Put bottles on RIGHT side of conveyor
-- Bottles will move RIGHT → LEFT
-- Watch them cross the cyan line
-
-### Step 3: View Results
-- Real-time classification shown
-- Statistics update automatically
-- Images saved to `captures/` folder
-
-### Step 4: View History
-- Click **"View History"** button
-- See all past inspections
-- Export data if needed
-
-### Step 5: Stop System
-- Click **"STOP SYSTEM"** button
-- Conveyor will stop
-- System ready to restart
-
----
-
-## 🚨 Troubleshooting
-
-### Camera Not Working
 ```bash
-# Check camera
-ls /dev/video*
-
-# Test camera
-python3 -c "import cv2; print(cv2.VideoCapture(0).isOpened())"
+./run.sh
 ```
 
-**Fix:**
-- Plug/unplug USB camera
-- Change `CAMERA_ID` in config.py
-- Set `USE_DUMMY_CAMERA = True` for testing
+---
+
+## 🎮 Using the System
+
+### Main Window
+
+```
+1. Click "START SYSTEM"
+2. Place bottles on conveyor
+3. System automatically detects and sorts
+4. View results in real-time
+5. Click "STOP SYSTEM" when done
+```
+
+### What You'll See
+
+- **Left Panel**: Live camera feed (30 FPS)
+- **Middle Panel**: Last inspection result with bounding boxes
+- **Right Panel**: Controls and statistics
 
 ---
 
-### Arduino Not Connecting
+## ⚙️ First-Time Calibration
+
+### 1. Measure Travel Time (CRITICAL!)
+
+```
+a) Place bottle at IR sensor
+b) Start stopwatch
+c) Move conveyor
+d) Stop when bottle reaches servo
+e) Record time in milliseconds
+
+Example: 4.5 seconds = 4500ms
+```
+
+Update in **TWO places**:
+- Arduino: `TRAVEL_TIME = 4500;`
+- Python: `TRAVEL_TIME_MS = 4500`
+
+### 2. Test with Single Bottle
+
+```
+1. Mark a bottle as "NG" (remove cap)
+2. Place on conveyor
+3. Start system
+4. Verify servo kicks at correct position
+```
+
+If kick is:
+- **Early**: Increase TRAVEL_TIME (+500ms)
+- **Late**: Decrease TRAVEL_TIME (-500ms)
+
+### 3. Adjust Camera Exposure
+
+If images are blurry:
+
+```python
+# config.py
+CAMERA_EXPOSURE = -6  # Shorter exposure = less blur
+```
+
+If images are too dark:
+- Increase lighting
+- Or increase exposure (but may cause blur)
+
+---
+
+## 🐛 Quick Troubleshooting
+
+### Camera not found
+
 ```bash
-# Check port
-ls /dev/ttyUSB* /dev/ttyACM*
+# List available cameras
+ls /dev/video*
+
+# Try different camera ID
+# In config.py:
+CAMERA_ID = 0  # or 1, 2, etc.
+```
+
+### Arduino not connecting
+
+```bash
+# List serial ports
+ls /dev/tty*
+
+# Common ports:
+# /dev/ttyUSB0
+# /dev/ttyACM0
 
 # Check permissions
 sudo usermod -a -G dialout $USER
-sudo reboot
+# Then logout and login
 ```
 
-**Fix:**
-- Check USB cable
-- Re-upload Arduino code
-- Change `ARDUINO_PORT` in config.py
-- Set `USE_DUMMY_HARDWARE = True` for testing
+### Model not loading
 
----
-
-### Model Not Loading
-**Error:** `Model file not found`
-
-**Fix:**
 ```bash
-# Check model exists
-ls model/best.pt
+# Check model files exist
+ls model/best_ncnn_model/
 
-# Download or retrain model
-# Place in model/best.pt
+# Should see:
+# model.ncnn.param
+# model.ncnn.bin
 ```
+
+### Wrong bottles rejected
+
+**Most common cause**: TRAVEL_TIME mismatch
+
+1. Remeasure travel time physically
+2. Update Arduino and Python config
+3. Test with single bottle
 
 ---
 
-### System Running Slow
-**Symptoms:** Laggy video, slow detection
+## 📊 Testing Checklist
 
-**Fix:**
-1. Lower resolution in config.py:
-```python
-CAMERA_WIDTH = 320
-CAMERA_HEIGHT = 240
-```
+Before production use:
 
-2. Increase confidence threshold:
-```python
-CONFIDENCE_THRESHOLD = 0.35
-```
-
-3. Close other programs
+- [ ] Single bottle test (OK bottle passes)
+- [ ] Single bottle test (NG bottle rejected)
+- [ ] Multiple bottles test (correct ones rejected)
+- [ ] No motion blur in captured images
+- [ ] AI detects all components correctly
+- [ ] Statistics updating correctly
+- [ ] Database logging working
 
 ---
 
-## 📝 Default Settings
+## 🎯 Performance Targets
 
-### Virtual Line
-- **Position:** X = 320 (center of 640px)
-- **Direction:** RIGHT → LEFT
-- **Adjust in:** `config.py` → `VIRTUAL_LINE_X`
-
-### Detection
-- **Confidence:** 0.25 (25%)
-- **NMS:** 0.45 (45%)
-- **Adjust in:** `config.py`
-
-### Serial
-- **Port:** /dev/ttyUSB0
-- **Baudrate:** 9600
-- **Adjust in:** `config.py` → `ARDUINO_PORT`
+- **AI Processing**: <150ms per bottle
+- **Throughput**: 30-40 bottles/minute
+- **Accuracy**: >95% detection rate
+- **Rejection Timing**: ±50ms precision
 
 ---
 
-## 🎯 Classification Rules
+## 📖 Next Steps
 
-### OK Product
-✅ Must have ALL:
-- `cap`
-- `filled`
-- `label`
-
-✅ Must have NONE:
-- `Cap-Defect`
-- `Filling-Defect`
-- `Label-Defect`
-- `Wrong-Product`
-
-### NG Product
-❌ If ANY defect detected
-❌ If ANY good component missing
+1. ✅ **Read**: `README.md` for detailed documentation
+2. ✅ **Calibrate**: `CALIBRATION_GUIDE.md` for fine-tuning
+3. ✅ **Optimize**: Adjust confidence and NMS thresholds
+4. ✅ **Monitor**: Check Arduino serial output for debugging
 
 ---
 
-## 📂 Important Files
+## 💡 Pro Tips
 
-| File | Purpose |
-|------|---------|
-| `main.py` | Run this to start system |
-| `config.py` | All settings here |
-| `arduino/arduino.ino` | Upload to Arduino |
-| `model/best.pt` | YOLO model file |
-| `database/product.db` | Results database |
-| `captures/ok/` | OK product images |
-| `captures/ng/` | NG product images |
+### Tip 1: Use Debug Mode
 
----
-
-## 🧪 Testing Mode
-
-For testing without hardware:
-
-**Edit `config.py`:**
-```python
-USE_DUMMY_CAMERA = True     # Simulate camera
-USE_DUMMY_HARDWARE = True   # Simulate Arduino
-```
-
-**Run:**
-```bash
-python3 main.py
-```
-
-System will run with simulated data for UI testing.
-
----
-
-## 📊 Where to Find Results
-
-### Real-time
-- **UI:** Main window shows live results
-- **Console:** Detailed logs printed
-
-### Historical
-- **Database:** `database/product.db`
-- **Images:** `captures/ok/` and `captures/ng/`
-- **UI:** Click "View History" button
-
-### Export Data
-```bash
-# Using SQLite
-sqlite3 database/product.db
-
-# View all records
-SELECT * FROM inspections ORDER BY id DESC LIMIT 10;
-
-# Export to CSV
-.mode csv
-.output results.csv
-SELECT * FROM inspections;
-.quit
-```
-
----
-
-## 🔧 Common Adjustments
-
-### Change Line Position
-```python
-# config.py
-VIRTUAL_LINE_X = 400  # Move right
-VIRTUAL_LINE_X = 200  # Move left
-```
-
-### Change Detection Sensitivity
-```python
-# config.py
-CONFIDENCE_THRESHOLD = 0.15  # More sensitive (more detections)
-CONFIDENCE_THRESHOLD = 0.40  # Less sensitive (fewer detections)
-```
-
-### Change Servo Position
-```arduino
-// arduino.ino
-const int SERVO_IDLE = 0;      // Adjust idle position
-const int SERVO_BLOCK = 120;   // Adjust block position
-```
-
----
-
-## 💡 Tips for Best Results
-
-### Camera Position
-- ✅ Good lighting (no shadows)
-- ✅ Fixed position (no shaking)
-- ✅ Clear view of bottles
-- ✅ Height: 30-50cm above conveyor
-
-### Conveyor Speed
-- ✅ Moderate speed (not too fast)
-- ✅ Consistent (no jerking)
-- ✅ Adjust line position if needed
-
-### Bottle Placement
-- ✅ Upright position
-- ✅ Single file (not overlapping)
-- ✅ Enter from RIGHT side
-
----
-
-## 📞 Need Help?
-
-### Check These First:
-1. ✅ All cables connected?
-2. ✅ Arduino code uploaded?
-3. ✅ Model file exists?
-4. ✅ Camera working?
-5. ✅ Correct port in config?
-
-### Debug Mode:
 ```python
 # config.py
 DEBUG_MODE = True
-VERBOSE_LOGGING = True
+SAVE_DEBUG_IMAGES = True
 ```
 
-This will print detailed information to console.
+This will:
+- Print detailed logs to terminal
+- Save annotated images to `captures/debug/`
 
----
+### Tip 2: Monitor Arduino
 
-## 🎓 For Graduation Defense
+Open Arduino Serial Monitor (9600 baud) to see:
+- Detection events
+- Queue status
+- Kick timing
+- Statistics
 
-### Prepare:
-1. ✅ Test system completely
-2. ✅ Prepare sample bottles (OK and NG)
-3. ✅ Clean database or prepare demo data
-4. ✅ Check lighting in demo room
-5. ✅ Have backup plan (dummy mode)
+### Tip 3: Test Dummy Mode First
 
-### Demo Checklist:
-- [ ] Power on Raspberry Pi
-- [ ] Connect camera
-- [ ] Connect Arduino
-- [ ] Upload Arduino code
-- [ ] Run `python3 main.py`
-- [ ] Click START SYSTEM
-- [ ] Place bottles
-- [ ] Show results
-- [ ] Show history
-- [ ] Explain classification logic
-
----
-
-## 🚀 Ready to Go!
-
-**Everything configured?**
-
-```bash
-cd Project_Graduation_3
-python3 main.py
+```python
+# config.py
+USE_DUMMY_CAMERA = True
+USE_DUMMY_HARDWARE = True
 ```
 
-**Click START SYSTEM and you're running!**
+This lets you test the UI without hardware.
+
+### Tip 4: Optimize Lighting
+
+```
+Good lighting = Better AI accuracy
+
+Tips:
+- Use diffused white LED lights
+- Avoid shadows
+- Consistent brightness
+- White/neutral background
+```
 
 ---
 
-**Questions? Check README.md and GRADUATION_DEFENSE_GUIDE.md**
+## 🆘 Need Help?
+
+1. **Check logs**: Terminal output shows detailed info
+2. **Arduino monitor**: Serial output shows hardware status
+3. **Debug images**: Check `captures/debug/` folder
+4. **Documentation**: Read `CALIBRATION_GUIDE.md`
 
 ---
 
+**You're ready to go! Start with a single bottle test and gradually increase complexity.** 🚀

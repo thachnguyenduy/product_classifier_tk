@@ -1,561 +1,413 @@
-# ============================================
-# MAIN WINDOW - Tkinter UI with Line Crossing
-# ============================================
 """
-Main UI Window for Coca-Cola Sorting System
-
-Features:
-- Live camera feed with virtual line visualization
-- Real-time AI detection with tracking
-- Object tracking and line crossing detection
-- Classification results display
-- System controls (START/STOP)
-- Statistics display
-
-IMPORTANT:
-- Conveyor direction: RIGHT → LEFT
-- Line crossing triggers classification
-- Classification is sent to Arduino immediately
-- IR sensor trigger happens later (physical position)
+Main Window for Coca-Cola Sorting System (CONTINUOUS MODE)
+"Control First" Strategy: Send decision to Arduino IMMEDIATELY after AI,
+then update UI/Database
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox
-import cv2
+from tkinter import ttk
 from PIL import Image, ImageTk
+import cv2
 import time
-import os
-from datetime import datetime
 import threading
-import config
 
 
 class MainWindow:
     """
-    Main UI window with live video, tracking, and controls
+    Main UI window with "Control First" strategy
+    Priority: Hardware control > UI updates
     """
     
-    def __init__(self, root, camera, ai_engine, hardware, database):
+    def __init__(self, root, camera, ai, hardware, database):
+        """
+        Initialize main window
+        
+        Args:
+            root: Tkinter root window
+            camera: Camera object
+            ai: AIEngine object
+            hardware: HardwareController object
+            database: Database object
+        """
         self.root = root
         self.camera = camera
-        self.ai = ai_engine
+        self.ai = ai
         self.hardware = hardware
         self.database = database
         
-        # System state
         self.system_running = False
-        self.classification_queue = []  # Queue of (result, reason, timestamp, object_id)
+        self.processing = False
         
-        # AI throttling (để giảm lag)
-        self.last_ai_time = 0
-        self.ai_interval = 0.1  # Chỉ chạy AI mỗi 100ms (10 FPS AI, 30 FPS camera)
-        self.last_ai_result = None  # Cache AI result
+        # UI elements
+        self.live_label = None
+        self.snapshot_label = None
+        self.result_label = None
+        self.stats_label = None
+        
+        # Latest frames
+        self.latest_live_frame = None
+        self.latest_snapshot = None
         
         # Statistics
         self.total_count = 0
         self.ok_count = 0
         self.ng_count = 0
         
-        # UI elements (will be created in _build_ui)
-        self.video_label = None
-        self.status_label = None
-        self.stats_label = None
-        self.queue_text = None
-        self.start_btn = None
-        self.stop_btn = None
-        
-        # Build UI
-        self._build_ui()
+        # Setup UI
+        self._setup_ui()
         
         # Start video update loop
-        self._update_video_loop()
+        self._update_video()
     
-    def _build_ui(self):
-        """Build the Tkinter user interface"""
-        self.root.title(config.SYSTEM_NAME)
-        self.root.geometry(f"{config.WINDOW_WIDTH}x{config.WINDOW_HEIGHT}")
+    def _setup_ui(self):
+        """Setup UI layout"""
+        self.root.title("Coca-Cola Sorting System - CONTINUOUS MODE")
+        self.root.geometry("1400x700")
+        self.root.configure(bg='#2c3e50')
         
         # Main container
-        main_frame = ttk.Frame(self.root, padding="10")
-        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        main_frame = tk.Frame(self.root, bg='#2c3e50')
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Configure grid weights
-        self.root.columnconfigure(0, weight=1)
-        self.root.rowconfigure(0, weight=1)
-        main_frame.columnconfigure(0, weight=3)  # Video takes more space
-        main_frame.columnconfigure(1, weight=1)  # Controls on right
-        main_frame.rowconfigure(0, weight=1)
+        # ====================================================================
+        # LEFT: Live Video
+        # ====================================================================
+        left_frame = tk.Frame(main_frame, bg='#34495e', relief=tk.RAISED, bd=2)
+        left_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
         
-        # === LEFT PANEL: VIDEO ===
-        left_frame = ttk.Frame(main_frame)
-        left_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
+        tk.Label(left_frame, text="LIVE VIDEO", 
+                font=('Arial', 14, 'bold'), bg='#34495e', fg='white').pack(pady=5)
         
-        # Video frame
-        video_frame = ttk.LabelFrame(left_frame, text="📹 Live Camera (Virtual Line)", padding="5")
-        video_frame.pack(fill=tk.BOTH, expand=True)
+        self.live_label = tk.Label(left_frame, bg='black')
+        self.live_label.pack(padx=10, pady=10)
         
-        self.video_label = ttk.Label(video_frame, text="Camera initializing...", background="black")
-        self.video_label.pack(fill=tk.BOTH, expand=True)
+        # FPS display
+        self.fps_label = tk.Label(left_frame, text="FPS: 0", 
+                                  font=('Arial', 10), bg='#34495e', fg='#3498db')
+        self.fps_label.pack()
         
-        # === RIGHT PANEL: CONTROLS & INFO ===
-        right_frame = ttk.Frame(main_frame)
-        right_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=5, pady=5)
+        # ====================================================================
+        # MIDDLE: Last Inspection Result
+        # ====================================================================
+        middle_frame = tk.Frame(main_frame, bg='#34495e', relief=tk.RAISED, bd=2)
+        middle_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
         
-        # Control buttons
-        control_frame = ttk.LabelFrame(right_frame, text="🎮 System Control", padding="10")
-        control_frame.pack(fill=tk.X, pady=5)
+        tk.Label(middle_frame, text="LAST INSPECTION", 
+                font=('Arial', 14, 'bold'), bg='#34495e', fg='white').pack(pady=5)
         
-        self.start_btn = ttk.Button(
-            control_frame,
-            text="▶ START SYSTEM",
-            command=self.start_system,
-            style="Accent.TButton"
-        )
-        self.start_btn.pack(fill=tk.X, pady=5)
+        self.snapshot_label = tk.Label(middle_frame, bg='black')
+        self.snapshot_label.pack(padx=10, pady=10)
         
-        self.stop_btn = ttk.Button(
-            control_frame,
-            text="⏹ STOP SYSTEM",
-            command=self.stop_system,
-            state=tk.DISABLED
-        )
-        self.stop_btn.pack(fill=tk.X, pady=5)
+        # Result display
+        self.result_label = tk.Label(middle_frame, text="WAITING...", 
+                                     font=('Arial', 20, 'bold'),
+                                     bg='#34495e', fg='#95a5a6',
+                                     width=20, height=2)
+        self.result_label.pack(pady=10)
         
-        ttk.Separator(control_frame, orient=tk.HORIZONTAL).pack(fill=tk.X, pady=10)
+        # Reason display
+        self.reason_label = tk.Label(middle_frame, text="", 
+                                     font=('Arial', 12),
+                                     bg='#34495e', fg='white',
+                                     wraplength=400)
+        self.reason_label.pack(pady=5)
         
-        history_btn = ttk.Button(
-            control_frame,
-            text="📊 View History",
-            command=self.show_history
-        )
-        history_btn.pack(fill=tk.X, pady=5)
+        # Processing time
+        self.time_label = tk.Label(middle_frame, text="", 
+                                   font=('Arial', 10),
+                                   bg='#34495e', fg='#95a5a6')
+        self.time_label.pack()
         
-        exit_btn = ttk.Button(
-            control_frame,
-            text="🚪 Exit",
-            command=self.on_closing
-        )
-        exit_btn.pack(fill=tk.X, pady=5)
+        # ====================================================================
+        # RIGHT: Control Panel
+        # ====================================================================
+        right_frame = tk.Frame(main_frame, bg='#34495e', relief=tk.RAISED, bd=2)
+        right_frame.pack(side=tk.LEFT, fill=tk.BOTH, padx=(5, 0))
+        
+        tk.Label(right_frame, text="CONTROL PANEL", 
+                font=('Arial', 14, 'bold'), bg='#34495e', fg='white').pack(pady=10)
+        
+        # System status
+        self.status_label = tk.Label(right_frame, text="● STOPPED", 
+                                     font=('Arial', 12, 'bold'),
+                                     bg='#34495e', fg='#e74c3c')
+        self.status_label.pack(pady=10)
+        
+        # Start button
+        self.start_btn = tk.Button(right_frame, text="START SYSTEM",
+                                   font=('Arial', 12, 'bold'),
+                                   bg='#27ae60', fg='white',
+                                   width=18, height=2,
+                                   command=self.start_system)
+        self.start_btn.pack(pady=5)
+        
+        # Stop button
+        self.stop_btn = tk.Button(right_frame, text="STOP SYSTEM",
+                                  font=('Arial', 12, 'bold'),
+                                  bg='#e74c3c', fg='white',
+                                  width=18, height=2,
+                                  command=self.stop_system,
+                                  state=tk.DISABLED)
+        self.stop_btn.pack(pady=5)
+        
+        # Separator
+        ttk.Separator(right_frame, orient='horizontal').pack(fill=tk.X, pady=15)
         
         # Statistics
-        stats_frame = ttk.LabelFrame(right_frame, text="📈 Statistics", padding="10")
-        stats_frame.pack(fill=tk.X, pady=5)
+        tk.Label(right_frame, text="TODAY'S STATISTICS", 
+                font=('Arial', 12, 'bold'), bg='#34495e', fg='white').pack(pady=5)
         
-        self.stats_label = ttk.Label(
-            stats_frame,
-            text="Total: 0\n✅ OK: 0\n❌ NG: 0",
-            font=("Arial", 14, "bold")
-        )
-        self.stats_label.pack()
+        self.stats_label = tk.Label(right_frame, 
+                                    text="Total: 0\nOK: 0\nNG: 0\nPass Rate: 0%",
+                                    font=('Arial', 11),
+                                    bg='#34495e', fg='white',
+                                    justify=tk.LEFT)
+        self.stats_label.pack(pady=10)
         
-        # Classification Queue
-        queue_frame = ttk.LabelFrame(right_frame, text="📦 Classification Queue", padding="10")
-        queue_frame.pack(fill=tk.BOTH, expand=True, pady=5)
+        # Separator
+        ttk.Separator(right_frame, orient='horizontal').pack(fill=tk.X, pady=15)
         
-        queue_scroll = ttk.Scrollbar(queue_frame)
-        queue_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        # View History button
+        self.history_btn = tk.Button(right_frame, text="VIEW HISTORY",
+                                     font=('Arial', 11),
+                                     bg='#3498db', fg='white',
+                                     width=18, height=2,
+                                     command=self.view_history)
+        self.history_btn.pack(pady=5)
         
-        self.queue_text = tk.Text(
-            queue_frame,
-            height=20,
-            width=30,
-            yscrollcommand=queue_scroll.set,
-            font=("Consolas", 9)
-        )
-        self.queue_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        queue_scroll.config(command=self.queue_text.yview)
+        # Exit button
+        self.exit_btn = tk.Button(right_frame, text="EXIT",
+                                  font=('Arial', 11),
+                                  bg='#95a5a6', fg='white',
+                                  width=18, height=2,
+                                  command=self.exit_app)
+        self.exit_btn.pack(pady=5)
         
-        # Status bar
-        self.status_label = ttk.Label(
-            self.root,
-            text="System Idle - Ready to Start",
-            relief=tk.SUNKEN,
-            anchor=tk.W
-        )
-        self.status_label.grid(row=1, column=0, sticky=(tk.W, tk.E))
+        # Mode indicator
+        tk.Label(right_frame, text="CONTINUOUS MODE", 
+                font=('Arial', 9, 'italic'), 
+                bg='#34495e', fg='#f39c12').pack(side=tk.BOTTOM, pady=10)
+    
+    def _update_video(self):
+        """Update live video display (runs continuously)"""
+        if self.camera and self.camera.is_running():
+            frame = self.camera.read_frame()
+            
+            if frame is not None:
+                self.latest_live_frame = frame
+                
+                # Convert to PhotoImage
+                display_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                display_frame = cv2.resize(display_frame, (640, 480))
+                img = Image.fromarray(display_frame)
+                imgtk = ImageTk.PhotoImage(image=img)
+                
+                # Update label
+                self.live_label.imgtk = imgtk
+                self.live_label.configure(image=imgtk)
+                
+                # Update FPS
+                fps = self.camera.get_fps()
+                self.fps_label.configure(text=f"FPS: {fps:.1f}")
         
-        # Handle window close
-        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        # Schedule next update (30 FPS)
+        self.root.after(33, self._update_video)
     
     def start_system(self):
-        """Start the sorting system"""
+        """Start automatic sorting system"""
         if self.system_running:
             return
         
-        # Check hardware connection
-        if not self.hardware.is_connected():
-            messagebox.showerror("Error", "Arduino not connected!\nCheck hardware connection.")
-            return
+        print("[UI] Starting system...")
         
-        # Start hardware listening
-        self.hardware.start_listening(self.on_ir_trigger)
-        
-        # Start conveyor
-        self.hardware.start_conveyor()
-        
-        # Update state
+        # Update UI
         self.system_running = True
-        self.start_btn.config(state=tk.DISABLED)
-        self.stop_btn.config(state=tk.NORMAL)
-        self.status_label.config(text="✅ SYSTEM RUNNING - Conveyor ON - Monitoring for bottles...")
+        self.status_label.configure(text="● RUNNING", fg='#27ae60')
+        self.start_btn.configure(state=tk.DISABLED)
+        self.stop_btn.configure(state=tk.NORMAL)
         
-        print("\n" + "="*60)
-        print("🚀 SYSTEM STARTED")
-        print("="*60)
-        print("Conveyor: RUNNING")
-        print("Monitoring: ACTIVE")
-        print("Waiting for bottles to cross line...")
-        print("="*60 + "\n")
+        # Start listening for detections from Arduino
+        self.hardware.start_listening(self.on_bottle_detected)
+        
+        print("[UI] System started - Waiting for bottle detections...")
     
     def stop_system(self):
-        """Stop the sorting system"""
+        """Stop automatic sorting system"""
         if not self.system_running:
             return
         
-        # Stop conveyor
-        self.hardware.stop_conveyor()
+        print("[UI] Stopping system...")
         
-        # Update state
-        self.system_running = False
-        self.start_btn.config(state=tk.NORMAL)
-        self.stop_btn.config(state=tk.DISABLED)
-        self.status_label.config(text="⏹ SYSTEM STOPPED - Conveyor OFF")
-        
-        print("\n" + "="*60)
-        print("⏹ SYSTEM STOPPED")
-        print("="*60 + "\n")
-    
-    def _update_video_loop(self):
-        """Continuous video update loop (OPTIMIZED - THROTTLED AI)"""
-        try:
-            frame = self.camera.get_frame()
-            
-            if frame is not None:
-                # Draw virtual line (luôn vẽ)
-                self._draw_virtual_line(frame)
-                
-                if self.system_running:
-                    # THROTTLE AI - CHỈ CHẠY MỖI 100ms (giảm lag)
-                    current_time = time.time()
-                    if current_time - self.last_ai_time >= self.ai_interval:
-                        self.last_ai_time = current_time
-                        
-                        # Run AI detection and tracking
-                        result = self.ai.predict_and_track(frame)
-                        
-                        # Cache result
-                        self.last_ai_result = result
-                        
-                        # Handle crossed objects
-                        for crossed_obj in result['crossed_objects']:
-                            self._on_bottle_crossed_line(crossed_obj, frame)
-                    
-                    # VẼ DETECTIONS từ cached result (nhanh)
-                    if hasattr(self, 'last_ai_result') and 'detections' in self.last_ai_result:
-                        if len(self.last_ai_result['detections']) > 0:
-                            self._draw_simple_detections(frame, self.last_ai_result['detections'])
-                
-                # Convert to Tkinter format (OPTIMIZED)
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                
-                # Resize using faster method
-                display_width = config.VIDEO_DISPLAY_WIDTH
-                h, w = frame_rgb.shape[:2]
-                aspect_ratio = h / w
-                display_height = int(display_width * aspect_ratio)
-                
-                # Use cv2.resize (faster than PIL)
-                frame_resized = cv2.resize(frame_rgb, (display_width, display_height), 
-                                          interpolation=cv2.INTER_LINEAR)
-                
-                img = Image.fromarray(frame_resized)
-                imgtk = ImageTk.PhotoImage(image=img)
-                self.video_label.imgtk = imgtk
-                self.video_label.configure(image=imgtk)
-            
-            # Schedule next update
-            self.root.after(config.UI_UPDATE_INTERVAL, self._update_video_loop)
-            
-        except Exception as e:
-            print(f"[ERROR] Video update loop failed: {e}")
-            import traceback
-            traceback.print_exc()
-            self.root.after(100, self._update_video_loop)
-    
-    def _draw_virtual_line(self, frame):
-        """Draw virtual line on frame"""
-        h, w = frame.shape[:2]
-        line_x = config.VIRTUAL_LINE_X
-        
-        # Draw vertical line
-        cv2.line(
-            frame,
-            (line_x, 0),
-            (line_x, h),
-            config.LINE_COLOR,
-            config.LINE_THICKNESS
-        )
-        
-        # Draw label
-        cv2.putText(
-            frame,
-            "DETECTION LINE",
-            (line_x + 10, 40),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.8,
-            config.LINE_COLOR,
-            2
-        )
-        
-        # Draw direction arrow
-        cv2.arrowedLine(
-            frame,
-            (line_x + 100, 70),
-            (line_x - 50, 70),
-            config.LINE_COLOR,
-            2,
-            tipLength=0.3
-        )
-        cv2.putText(
-            frame,
-            "RIGHT → LEFT",
-            (line_x - 50, 100),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            0.5,
-            config.LINE_COLOR,
-            1
-        )
-    
-    def _draw_simple_detections(self, frame, detections):
-        """
-        Vẽ detections ĐƠN GIẢN - CHỈ BOX VÀ LABEL
-        Tối ưu cho performance (giới hạn số lượng vẽ)
-        """
-        # Giới hạn max 10 detections để vẽ (tăng tốc)
-        for det in detections[:10]:
-            x1, y1, x2, y2 = det['bbox']
-            class_id = det['class_id']
-            class_name = det['class_name']
-            confidence = det['confidence']
-            
-            # Màu sắc theo loại class
-            if class_id < 4:  # Defects
-                color = (0, 0, 255)  # Red
-            else:  # Good classes
-                color = (0, 255, 0)  # Green
-            
-            # Vẽ box (đơn giản, line mỏng hơn)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 1)
-            
-            # Label ngắn gọn, font nhỏ hơn
-            label = f"{class_name}: {confidence:.2f}"
-            cv2.putText(
-                frame,
-                label,
-                (x1, y1 - 5),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.4,
-                color,
-                1
-            )
-    
-    def _on_bottle_crossed_line(self, tracked_obj, frame):
-        """
-        Called when a bottle crosses the virtual line
-        
-        Actions:
-        1. Add classification to queue
-        2. Send classification to Arduino immediately
-        3. Save snapshot
-        4. Log to database
-        5. Update UI
-        """
-        result = tracked_obj.classification_result
-        reason = tracked_obj.classification_reason
-        object_id = tracked_obj.object_id
-        detected_classes = tracked_obj.detected_classes
-        
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        
-        print(f"\n{'='*60}")
-        print(f"🎯 BOTTLE CROSSED LINE!")
-        print(f"{'='*60}")
-        print(f"Object ID: {object_id}")
-        print(f"Detected Classes: {detected_classes}")
-        print(f"Classification: {result}")
-        print(f"Reason: {reason}")
-        print(f"{'='*60}\n")
-        
-        # Add to queue
-        self.classification_queue.append({
-            'result': result,
-            'reason': reason,
-            'timestamp': timestamp,
-            'object_id': object_id,
-            'detected_classes': detected_classes
-        })
-        
-        # Send classification to Arduino immediately
-        self.hardware.send_classification(result)
-        
-        # Save snapshot (in separate thread to avoid blocking)
-        threading.Thread(
-            target=self._save_and_log,
-            args=(frame.copy(), result, reason, object_id, detected_classes),
-            daemon=True
-        ).start()
+        # Stop listening
+        self.hardware.stop_listening()
         
         # Update UI
-        self.root.after(0, self._update_queue_display)
-    
-    def _save_and_log(self, frame, result, reason, object_id, detected_classes):
-        """Save snapshot and log to database (runs in separate thread)"""
-        try:
-            # Save snapshot
-            image_path = self._save_snapshot(frame, result, object_id)
-            
-            # Log to database
-            self.database.add_inspection({
-                'object_id': object_id,
-                'detected_labels': detected_classes,
-                'result': result,
-                'reason': reason,
-                'image_path': image_path,
-                'processing_time': 0
-            })
-            
-            if config.VERBOSE_LOGGING:
-                print(f"[UI] Saved and logged: {result} | {image_path}")
+        self.system_running = False
+        self.status_label.configure(text="● STOPPED", fg='#e74c3c')
+        self.start_btn.configure(state=tk.NORMAL)
+        self.stop_btn.configure(state=tk.DISABLED)
         
-        except Exception as e:
-            print(f"[ERROR] Save and log failed: {e}")
-            import traceback
-            traceback.print_exc()
+        print("[UI] System stopped")
     
-    def _save_snapshot(self, frame, result, object_id):
-        """Save annotated snapshot"""
-        if not config.SAVE_SNAPSHOTS:
-            return ""
-        
-        try:
-            # Choose directory
-            if result == 'OK':
-                save_dir = config.CAPTURE_OK_PATH
-            else:
-                save_dir = config.CAPTURE_NG_PATH
-            
-            os.makedirs(save_dir, exist_ok=True)
-            
-            # Generate filename
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-            filename = f"{result}_{object_id}_{timestamp}.jpg"
-            filepath = os.path.join(save_dir, filename)
-            
-            # Save
-            cv2.imwrite(filepath, frame)
-            
-            return filepath
-            
-        except Exception as e:
-            print(f"[ERROR] Save snapshot failed: {e}")
-            return ""
-    
-    def on_ir_trigger(self):
+    def on_bottle_detected(self, timestamp):
         """
-        Called when Arduino sends 'T' (IR sensor triggered)
+        Handle bottle detection from Arduino
+        CONTROL FIRST STRATEGY: Capture -> AI -> Send Decision -> Update UI
         
-        Actions:
-        1. Pop oldest classification from queue
-        2. Update statistics
-        3. Update UI
-        
-        Note: Classification was already sent to Arduino when bottle crossed line
-        This is just for bookkeeping and statistics
+        Args:
+            timestamp: Detection timestamp from Arduino (or None)
         """
-        print("\n" + "="*60)
-        print("🔔 IR SENSOR TRIGGERED!")
-        print("="*60)
-        
-        if len(self.classification_queue) == 0:
-            print("⚠️ WARNING: IR triggered but queue is EMPTY!")
-            print("Possible causes:")
-            print("  - Bottle passed without crossing virtual line")
-            print("  - System just started")
-            print("  - Queue/timing mismatch")
-            print("="*60 + "\n")
+        if not self.system_running or self.processing:
             return
         
-        # Pop oldest from queue (FIFO)
-        item = self.classification_queue.pop(0)
+        print(f"[UI] Bottle detected! (timestamp: {timestamp})")
         
-        result = item['result']
-        reason = item['reason']
-        timestamp = item['timestamp']
-        object_id = item['object_id']
-        
-        print(f"Processing queued classification:")
-        print(f"  Object ID: {object_id}")
-        print(f"  Result: {result}")
-        print(f"  Reason: {reason}")
-        print(f"  Time: {timestamp}")
-        print(f"  Queue remaining: {len(self.classification_queue)}")
-        print("="*60 + "\n")
-        
-        # Update statistics
-        self.total_count += 1
-        if result == 'OK':
-            self.ok_count += 1
-        else:
-            self.ng_count += 1
-        
-        # Update UI
-        self.root.after(0, self._update_statistics_display)
-        self.root.after(0, self._update_queue_display)
+        # Process in separate thread to avoid blocking
+        thread = threading.Thread(target=self._process_bottle, daemon=True)
+        thread.start()
     
-    def _update_queue_display(self):
-        """Update queue text widget"""
-        self.queue_text.delete('1.0', tk.END)
+    def _process_bottle(self):
+        """
+        Process bottle detection (runs in separate thread)
+        CRITICAL: Send decision to Arduino IMMEDIATELY after AI
+        """
+        self.processing = True
         
-        if len(self.classification_queue) == 0:
-            self.queue_text.insert(tk.END, "Queue is empty\n\n")
-            self.queue_text.insert(tk.END, "Waiting for bottles to cross line...")
-        else:
-            self.queue_text.insert(tk.END, f"Queue Size: {len(self.classification_queue)}\n")
-            self.queue_text.insert(tk.END, "="*40 + "\n\n")
+        try:
+            start_time = time.time()
             
-            # Show items (most recent at top)
-            for i, item in enumerate(reversed(self.classification_queue[-10:])):
-                result_icon = "✅" if item['result'] == 'OK' else "❌"
-                self.queue_text.insert(tk.END, f"{result_icon} Object #{item['object_id']}\n")
-                self.queue_text.insert(tk.END, f"   Time: {item['timestamp']}\n")
-                self.queue_text.insert(tk.END, f"   Result: {item['result']}\n")
-                self.queue_text.insert(tk.END, f"   {item['reason']}\n\n")
+            # STEP 1: Capture frame
+            frame = self.camera.capture_snapshot()
+            if frame is None:
+                print("[ERROR] Failed to capture frame")
+                self.processing = False
+                return
+            
+            # STEP 2: Run AI prediction
+            result = self.ai.predict(frame)
+            
+            # STEP 3: SEND DECISION TO ARDUINO IMMEDIATELY (Control First!)
+            decision = result['result']
+            if decision == 'OK':
+                self.hardware.send_ok()
+            else:
+                self.hardware.send_ng()
+            
+            print(f"[UI] Decision sent to Arduino: {decision}")
+            
+            # STEP 4: Now update UI (after hardware control is done)
+            self.root.after(0, self._display_result, result)
+            
+            # STEP 5: Save to database (lowest priority)
+            self._save_result(result)
+            
+            # STEP 6: Update statistics
+            self._update_statistics()
+            
+        except Exception as e:
+            print(f"[ERROR] Processing failed: {e}")
+            import traceback
+            traceback.print_exc()
+        finally:
+            self.processing = False
     
-    def _update_statistics_display(self):
-        """Update statistics label"""
-        stats_text = f"Total: {self.total_count}\n"
-        stats_text += f"✅ OK: {self.ok_count}\n"
-        stats_text += f"❌ NG: {self.ng_count}"
+    def _display_result(self, result):
+        """
+        Display result in UI (called from main thread)
         
-        if self.total_count > 0:
-            ok_percent = (self.ok_count / self.total_count) * 100
-            stats_text += f"\n\nYield: {ok_percent:.1f}%"
+        Args:
+            result: Result dict from AI
+        """
+        # Display annotated image
+        if 'annotated_image' in result:
+            img = result['annotated_image']
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img_rgb = cv2.resize(img_rgb, (640, 480))
+            img_pil = Image.fromarray(img_rgb)
+            imgtk = ImageTk.PhotoImage(image=img_pil)
+            
+            self.snapshot_label.imgtk = imgtk
+            self.snapshot_label.configure(image=imgtk)
         
-        self.stats_label.config(text=stats_text)
+        # Display result
+        decision = result['result']
+        if decision == 'OK':
+            self.result_label.configure(text="✓ OK", fg='#27ae60', bg='#d5f4e6')
+        else:
+            self.result_label.configure(text="✗ NG", fg='#e74c3c', bg='#fadbd8')
+        
+        # Display reason
+        reason = result.get('reason', '')
+        self.reason_label.configure(text=reason)
+        
+        # Display processing time
+        proc_time = result.get('processing_time', 0)
+        self.time_label.configure(text=f"Processing: {proc_time*1000:.1f} ms")
     
-    def show_history(self):
-        """Show history window"""
+    def _save_result(self, result):
+        """
+        Save result to database
+        
+        Args:
+            result: Result dict from AI
+        """
+        # Chia nhỏ: luôn cố gắng ghi DB, kể cả khi lưu ảnh bị lỗi
+        image_path = ""
+
+        # 1. Lưu ảnh (nếu có), không để lỗi ảnh chặn việc ghi DB
+        try:
+            decision = result.get('result', 'UNKNOWN')
+            save_dir = "captures/ok" if decision == 'OK' else "captures/ng"
+            image = result.get('annotated_image')
+
+            if image is not None:
+                image_path = self.camera.save_image(image, save_dir, decision)
+        except Exception as e:
+            print(f"[ERROR] Failed to save image for result: {e}")
+
+        # 2. Ghi đường dẫn ảnh (nếu thành công) vào result và luôn cố gắng ghi DB
+        if image_path:
+            result['image_path'] = image_path
+
+        try:
+            self.database.add_inspection(result)
+        except Exception as e:
+            print(f"[ERROR] Failed to add inspection to database: {e}")
+    
+    def _update_statistics(self):
+        """Update statistics display"""
+        try:
+            stats = self.database.get_today_statistics()
+            
+            self.total_count = stats['total']
+            self.ok_count = stats['ok']
+            self.ng_count = stats['ng']
+            pass_rate = stats['pass_rate']
+            
+            # Update label
+            stats_text = f"Total: {self.total_count}\n"
+            stats_text += f"OK: {self.ok_count}\n"
+            stats_text += f"NG: {self.ng_count}\n"
+            stats_text += f"Pass Rate: {pass_rate:.1f}%"
+            
+            self.root.after(0, self.stats_label.configure, {'text': stats_text})
+            
+        except Exception as e:
+            print(f"[ERROR] Failed to update statistics: {e}")
+    
+    def view_history(self):
+        """Open history window"""
         from ui.history_window import HistoryWindow
         HistoryWindow(self.root, self.database)
     
-    def on_closing(self):
-        """Handle window close"""
-        if messagebox.askokcancel("Quit", "Are you sure you want to quit?"):
-            print("\n[UI] Closing application...")
-            
-            if self.system_running:
-                self.stop_system()
-            
-            self.camera.stop()
-            self.hardware.stop()
-            self.root.destroy()
+    def exit_app(self):
+        """Exit application"""
+        print("[UI] Exiting application...")
+        
+        # Stop system if running
+        if self.system_running:
+            self.stop_system()
+        
+        # Close window
+        self.root.quit()
+        self.root.destroy()
