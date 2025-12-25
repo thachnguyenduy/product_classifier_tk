@@ -220,6 +220,9 @@ class MainWindow:
         
         print("[UI] Starting system...")
         
+        # Start conveyor belt (relay ON)
+        self.hardware.start_conveyor()
+        
         # Update UI
         self.system_running = True
         self.status_label.configure(text="● RUNNING", fg='#27ae60')
@@ -229,7 +232,7 @@ class MainWindow:
         # Start listening for detections from Arduino
         self.hardware.start_listening(self.on_bottle_detected)
         
-        print("[UI] System started - Waiting for bottle detections...")
+        print("[UI] System started - Conveyor running, waiting for detections...")
     
     def stop_system(self):
         """Stop automatic sorting system"""
@@ -241,13 +244,16 @@ class MainWindow:
         # Stop listening
         self.hardware.stop_listening()
         
+        # Stop conveyor belt (relay OFF)
+        self.hardware.stop_conveyor()
+        
         # Update UI
         self.system_running = False
         self.status_label.configure(text="● STOPPED", fg='#e74c3c')
         self.start_btn.configure(state=tk.NORMAL)
         self.stop_btn.configure(state=tk.DISABLED)
         
-        print("[UI] System stopped")
+        print("[UI] System stopped - Conveyor stopped, detection paused")
     
     def on_bottle_detected(self, timestamp):
         """

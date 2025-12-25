@@ -116,6 +116,16 @@ class HardwareController:
         """Send NG decision to Arduino"""
         return self.send_command('N')
     
+    def start_conveyor(self):
+        """Start conveyor belt (relay ON)"""
+        print("[Hardware] Starting conveyor belt...")
+        return self.send_command('S')
+    
+    def stop_conveyor(self):
+        """Stop conveyor belt (relay OFF)"""
+        print("[Hardware] Stopping conveyor belt...")
+        return self.send_command('P')
+    
     def start_listening(self, detection_callback):
         """
         Start listening for detection signals from Arduino
@@ -261,6 +271,16 @@ class DummyHardwareController:
     def send_ng(self):
         """Simulate NG"""
         return self.send_command('N')
+    
+    def start_conveyor(self):
+        """Simulate start conveyor"""
+        print("[Hardware] DUMMY conveyor started")
+        return True
+    
+    def stop_conveyor(self):
+        """Simulate stop conveyor"""
+        print("[Hardware] DUMMY conveyor stopped")
+        return True
     
     def start_listening(self, detection_callback):
         """Start simulating detections"""

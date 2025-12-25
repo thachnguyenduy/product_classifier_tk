@@ -71,6 +71,9 @@ unsigned long totalDetections = 0;
 unsigned long totalRejections = 0;
 unsigned long totalPassed = 0;
 
+// System State
+bool conveyorRunning = false;  // Conveyor state (controlled by Pi)
+
 // ============================================================================
 // SETUP
 // ============================================================================
@@ -88,8 +91,9 @@ void setup() {
   rejectServo.attach(SERVO_PIN);
   rejectServo.write(SERVO_IDLE);
   
-  // Conveyor ALWAYS runs in continuous mode
-  digitalWrite(RELAY_PIN, LOW);
+  // Conveyor starts STOPPED (wait for 'S' command from Pi)
+  digitalWrite(RELAY_PIN, HIGH);  // HIGH = Stop
+  conveyorRunning = false;
   
   // Initialize queue (all false = no pending rejections)
   for (int i = 0; i < BUFFER_SIZE; i++) {
@@ -111,8 +115,8 @@ void setup() {
   Serial.println(" ms");
   Serial.print("Buffer Size: ");
   Serial.println(BUFFER_SIZE);
-  Serial.println("Conveyor Running (Continuous)...");
-  Serial.println("Ready for operation.");
+  Serial.println("Conveyor: STOPPED (waiting for START command)");
+  Serial.println("Ready. Send 'S' to start, 'P' to pause.");
   Serial.println();
 }
 
@@ -139,6 +143,11 @@ void loop() {
 // ============================================================================
 
 void checkSensor1() {
+  // Only check sensor if conveyor is running
+  if (!conveyorRunning) {
+    return;
+  }
+  
   bool currentState = digitalRead(SENSOR_1_PIN);
   unsigned long currentTime = millis();
   
@@ -184,6 +193,11 @@ void handleBottleDetection(unsigned long detectionTime) {
 // ============================================================================
 
 void checkSensor2() {
+  // Only check sensor if conveyor is running
+  if (!conveyorRunning) {
+    return;
+  }
+  
   bool currentState = digitalRead(SENSOR_2_PIN);
   unsigned long currentTime = millis();
   
@@ -231,9 +245,17 @@ void handleServoSensorDetection() {
 
 void checkSerial() {
   if (Serial.available() > 0) {
-    char decision = Serial.read();
+    char command = Serial.read();
     
-    if (decision == 'O') {
+    if (command == 'S') {
+      // START command - start conveyor
+      startConveyor();
+    }
+    else if (command == 'P') {
+      // PAUSE/STOP command - stop conveyor
+      stopConveyor();
+    }
+    else if (command == 'O') {
       // OK product - bottle at decisionIndex stays false (OK)
       if (decisionIndex != queueTail) {
         Serial.print("[Pi Decision] OK → Bottle at index ");
@@ -246,7 +268,7 @@ void checkSerial() {
         Serial.println("[WARNING] Received OK but no bottle waiting for decision");
       }
     } 
-    else if (decision == 'N') {
+    else if (command == 'N') {
       // NG product - mark bottle at decisionIndex as pending rejection
       markAsRejection();
     }
@@ -268,6 +290,30 @@ void markAsRejection() {
     decisionIndex = (decisionIndex + 1) % BUFFER_SIZE;
   } else {
     Serial.println("[WARNING] Received NG but no bottle waiting for decision");
+  }
+}
+
+// ============================================================================
+// CONVEYOR CONTROL
+// ============================================================================
+
+void startConveyor() {
+  if (!conveyorRunning) {
+    digitalWrite(RELAY_PIN, LOW);  // LOW = Run
+    conveyorRunning = true;
+    Serial.println("[Conveyor] STARTED - Belt running");
+  } else {
+    Serial.println("[Conveyor] Already running");
+  }
+}
+
+void stopConveyor() {
+  if (conveyorRunning) {
+    digitalWrite(RELAY_PIN, HIGH);  // HIGH = Stop
+    conveyorRunning = false;
+    Serial.println("[Conveyor] STOPPED - Belt paused");
+  } else {
+    Serial.println("[Conveyor] Already stopped");
   }
 }
 
