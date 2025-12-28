@@ -22,16 +22,33 @@ class HistoryWindow:
             database: Database object
         """
         self.database = database
+        self._closed = False
+        self._pending_after_id = None
         
         # Create window
         self.window = tk.Toplevel(parent)
         self.window.title("Inspection History")
         self.window.geometry("1000x600")
         self.window.configure(bg='#2c3e50')
-        self.window.protocol("WM_DELETE_WINDOW", self.window.destroy)
+        self.window.protocol("WM_DELETE_WINDOW", self._on_close)
         
         self._setup_ui()
         self._load_data_async()
+
+    def _on_close(self):
+        """Safely close the window (prevents after-callbacks on a destroyed widget)."""
+        self._closed = True
+        try:
+            if self._pending_after_id is not None:
+                self.window.after_cancel(self._pending_after_id)
+                self._pending_after_id = None
+        except Exception:
+            pass
+
+        try:
+            self.window.destroy()
+        except Exception:
+            pass
     
     def _setup_ui(self):
         """Setup UI layout"""
@@ -113,6 +130,8 @@ class HistoryWindow:
         Load inspection data from database without blocking the Tkinter UI thread.
         This prevents REFRESH/CLOSE from "freezing" when the DB is temporarily locked.
         """
+        if self._closed:
+            return
         try:
             if hasattr(self, "refresh_btn") and self.refresh_btn:
                 self.refresh_btn.configure(state=tk.DISABLED, text="LOADING...")
@@ -129,39 +148,57 @@ class HistoryWindow:
             inspections = []
 
         # Render on UI thread
-        self.window.after(0, self._render_rows, inspections)
+        try:
+            if self._closed:
+                return
+            self._pending_after_id = self.window.after(0, self._render_rows, inspections)
+        except Exception:
+            # Window was likely closed; ignore
+            return
 
     def _render_rows(self, inspections):
-        # Clear existing data
-        for item in self.tree.get_children():
-            self.tree.delete(item)
-
-        for row in inspections:
-            # row format: (id, timestamp, result, reason, has_cap, has_filled,
-            #              has_label, defects, image_path, processing_time, num_detections)
-            id_val = row[0]
-            timestamp = row[1]
-            result = row[2]
-            reason = row[3]
-            has_cap = '✓' if row[4] else '✗'
-            has_filled = '✓' if row[5] else '✗'
-            has_label = '✓' if row[6] else '✗'
-            defects = row[7] if row[7] else '-'
-            proc_time = f"{row[9]*1000:.1f}" if row[9] else '-'
-
-            item_id = self.tree.insert('', tk.END, values=(
-                id_val, timestamp, result, reason,
-                has_cap, has_filled, has_label, defects, proc_time
-            ))
-
-            self.tree.item(item_id, tags=('ok',) if result == 'OK' else ('ng',))
-
-        # Configure tags
-        self.tree.tag_configure('ok', background='#d5f4e6')
-        self.tree.tag_configure('ng', background='#fadbd8')
-
         try:
-            if hasattr(self, "refresh_btn") and self.refresh_btn:
-                self.refresh_btn.configure(state=tk.NORMAL, text="REFRESH")
-        except Exception:
-            pass
+            self._pending_after_id = None
+            if self._closed:
+                return
+
+            def safe_get(r, idx, default=None):
+                try:
+                    return r[idx]
+                except Exception:
+                    return default
+
+            # Clear existing data
+            for item in self.tree.get_children():
+                self.tree.delete(item)
+
+            for row in inspections:
+                # row format may vary across DB versions; read defensively
+                id_val = safe_get(row, 0, "")
+                timestamp = safe_get(row, 1, "")
+                result = safe_get(row, 2, "UNKNOWN")
+                reason = safe_get(row, 3, "")
+                has_cap = '✓' if safe_get(row, 4, 0) else '✗'
+                has_filled = '✓' if safe_get(row, 5, 0) else '✗'
+                has_label = '✓' if safe_get(row, 6, 0) else '✗'
+                defects_val = safe_get(row, 7, "")
+                defects = defects_val if defects_val else '-'
+                proc_s = safe_get(row, 9, None)
+                proc_time = f"{proc_s * 1000:.1f}" if proc_s else '-'
+
+                item_id = self.tree.insert('', tk.END, values=(
+                    id_val, timestamp, result, reason,
+                    has_cap, has_filled, has_label, defects, proc_time
+                ))
+
+                self.tree.item(item_id, tags=('ok',) if result == 'OK' else ('ng',))
+
+            # Configure tags
+            self.tree.tag_configure('ok', background='#d5f4e6')
+            self.tree.tag_configure('ng', background='#fadbd8')
+        finally:
+            try:
+                if (not self._closed) and hasattr(self, "refresh_btn") and self.refresh_btn:
+                    self.refresh_btn.configure(state=tk.NORMAL, text="REFRESH")
+            except Exception:
+                pass
