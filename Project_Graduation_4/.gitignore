@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# System
+.DS_Store
+Thumbs.db
+
+# Project specific
+captures/ok/*.jpg
+captures/ng/*.jpg
+captures/debug/*.jpg
+database/product.db
+*.log
+
+# Keep directory structure
+!captures/ok/.gitkeep
+!captures/ng/.gitkeep
+!database/.gitkeep
+
+# Model files (too large for git)
+model/*.bin
+model/*.param
