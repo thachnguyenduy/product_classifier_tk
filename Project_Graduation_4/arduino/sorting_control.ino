@@ -32,7 +32,7 @@ const int SERVO_PIN = 9;        // Servo Motor MG996R for rejection
 
 // Servo Configuration (MG996R optimized)
 const int SERVO_IDLE = 0;         // Idle position (rack retracted, no blocking)
-const int SERVO_KICK = 90;        // Kick position (rack extended, blocking conveyor)
+const int SERVO_KICK = 180;        // Kick position (rack extended, blocking conveyor)
                                   // MG996R: 0-180°, adjust based on rack travel distance
 const int SERVO_KICK_DURATION = 2000;  // How long servo stays extended (ms)
                                        // Keeps rack blocking for 2 seconds so bottle falls by inertia
@@ -41,9 +41,14 @@ const int SERVO_KICK_DURATION = 2000;  // How long servo stays extended (ms)
 const int BUFFER_SIZE = 20;       // Max bottles that can be tracked simultaneously
                                   // Allows multiple bottles in processing zone
 
-// Sensor Debouncing
-const int DEBOUNCE_DELAY = 300;   // Minimum time between detections (ms)
-                                  // Prevents double-counting same bottle
+// Sensor Debouncing / Lockout
+// NOTE:
+// - Sensor 1 can "blink" multiple times for 1 bottle due to reflections/noise.
+//   We add a longer lockout + re-arm (must return HIGH stable) to avoid double-trigger.
+// - Sensor 2 should stay responsive, so keep a shorter debounce.
+const int SENSOR1_LOCKOUT_MS = 800;   // Minimum time between IR1 detections (ms)
+const int SENSOR1_REARM_HIGH_MS = 150; // IR1 must stay HIGH this long to re-arm (ms)
+const int SENSOR2_DEBOUNCE_MS = 300;  // Minimum time between IR2 detections (ms)
 
 // ============================================================================
 // GLOBAL VARIABLES
@@ -61,6 +66,8 @@ int decisionIndex = 0; // Index of next bottle waiting for Pi's decision
 // Sensor 1 State (Start position)
 bool lastSensor1State = HIGH;
 unsigned long lastSensor1Time = 0;
+bool sensor1Armed = true;
+unsigned long sensor1HighSince = 0;
 
 // Sensor 2 State (Near servo)
 bool lastSensor2State = HIGH;
@@ -151,11 +158,23 @@ void checkSensor1() {
   bool currentState = digitalRead(SENSOR_1_PIN);
   unsigned long currentTime = millis();
   
-  // Detect falling edge (HIGH -> LOW) with debouncing
-  if (lastSensor1State == HIGH && currentState == LOW) {
-    if (currentTime - lastSensor1Time > DEBOUNCE_DELAY) {
+  // Re-arm logic: after a detection, IR1 must return to HIGH and stay stable
+  // for SENSOR1_REARM_HIGH_MS before we allow the next detection.
+  if (currentState == HIGH) {
+    if (lastSensor1State != HIGH) {
+      sensor1HighSince = currentTime;
+    }
+    if (!sensor1Armed && (currentTime - sensor1HighSince >= (unsigned long)SENSOR1_REARM_HIGH_MS)) {
+      sensor1Armed = true;
+    }
+  }
+
+  // Detect falling edge (HIGH -> LOW) with lockout + armed gate
+  if (sensor1Armed && lastSensor1State == HIGH && currentState == LOW) {
+    if (currentTime - lastSensor1Time > (unsigned long)SENSOR1_LOCKOUT_MS) {
       handleBottleDetection(currentTime);
       lastSensor1Time = currentTime;
+      sensor1Armed = false; // disarm until sensor returns HIGH stable
     }
   }
   
@@ -203,7 +222,7 @@ void checkSensor2() {
   
   // Detect falling edge (HIGH -> LOW) with debouncing
   if (lastSensor2State == HIGH && currentState == LOW) {
-    if (currentTime - lastSensor2Time > DEBOUNCE_DELAY) {
+    if (currentTime - lastSensor2Time > (unsigned long)SENSOR2_DEBOUNCE_MS) {
       handleServoSensorDetection();
       lastSensor2Time = currentTime;
     }
