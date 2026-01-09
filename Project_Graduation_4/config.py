@@ -74,8 +74,8 @@ CAMERA_AUTO_EXPOSURE = False
 # Crop pixels from each edge, then resize back to CAMERA_WIDTH x CAMERA_HEIGHT.
 # This effectively reduces the visible area without changing output resolution.
 ENABLE_ROI_CROP = True
-ROI_CROP_LEFT_PX = 100
-ROI_CROP_RIGHT_PX = 100
+ROI_CROP_LEFT_PX = 0
+ROI_CROP_RIGHT_PX = 0
 ROI_CROP_TOP_PX = 0
 ROI_CROP_BOTTOM_PX = 0
 
