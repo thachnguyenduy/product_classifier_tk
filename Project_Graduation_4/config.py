@@ -90,8 +90,7 @@ ARDUINO_PORT = '/dev/ttyUSB0'
 ARDUINO_BAUDRATE = 9600
 ARDUINO_TIMEOUT = 0.1  # Short timeout for fast response
 
-# Travel time from sensor to servo (milliseconds)
-# CRITICAL: Must match Arduino's TRAVEL_TIME setting
+
 TRAVEL_TIME_MS = 4500
 
 # ============================================================================
