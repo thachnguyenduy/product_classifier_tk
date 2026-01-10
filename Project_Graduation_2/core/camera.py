@@ -8,6 +8,7 @@ import numpy as np
 import threading
 import time
 from datetime import datetime
+import config
 
 
 class Camera:
@@ -158,9 +159,35 @@ class Camera:
             numpy.ndarray: BGR frame or None
         """
         with self.lock:
-            if self.frame is not None:
-                return self.frame.copy()
-            return None
+            if self.frame is None:
+                return None
+            frame = self.frame.copy()
+
+        # Apply ROI crop (left/right/top/bottom) then resize back to original size.
+        # This reduces visible area without changing output resolution.
+        try:
+            if getattr(config, "ENABLE_ROI_CROP", False):
+                left = int(getattr(config, "ROI_CROP_LEFT_PX", 0) or 0)
+                right = int(getattr(config, "ROI_CROP_RIGHT_PX", 0) or 0)
+                top = int(getattr(config, "ROI_CROP_TOP_PX", 0) or 0)
+                bottom = int(getattr(config, "ROI_CROP_BOTTOM_PX", 0) or 0)
+
+                left = max(0, left)
+                right = max(0, right)
+                top = max(0, top)
+                bottom = max(0, bottom)
+
+                h, w = frame.shape[:2]
+                # Ensure we keep at least 1x1 pixels
+                if (left + right) < (w - 1) and (top + bottom) < (h - 1):
+                    cropped = frame[top:h - bottom, left:w - right]
+                    if cropped is not None and cropped.shape[0] > 0 and cropped.shape[1] > 0:
+                        frame = cv2.resize(cropped, (self.width, self.height))
+        except Exception:
+            # Never let ROI/crop break the main loop
+            pass
+
+        return frame
     
     def capture_snapshot(self):
         """

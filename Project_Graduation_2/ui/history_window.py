@@ -30,6 +30,9 @@ class HistoryWindow:
         self.window.title("Inspection History")
         self.window.geometry("1000x600")
         self.window.configure(bg='#2c3e50')
+        self.window.transient(parent)
+        self.window.lift()
+        self.window.after(0, self.window.focus_force)
         self.window.protocol("WM_DELETE_WINDOW", self._on_close)
         
         self._setup_ui()
@@ -121,7 +124,7 @@ class HistoryWindow:
             font=('Arial', 11),
             bg='#95a5a6', fg='white',
             width=15,
-            command=self.window.destroy
+            command=self._on_close,
         )
         close_btn.pack(side=tk.LEFT, padx=5)
     
