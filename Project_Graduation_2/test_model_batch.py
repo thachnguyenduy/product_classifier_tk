@@ -10,6 +10,7 @@ import cv2
 
 import config
 from core.ai import AIEngine
+from core.camera import Camera, DummyCamera
 
 
 @dataclass
@@ -57,8 +58,102 @@ def percentile(values: List[float], p: float) -> float:
     return d0 + d1
 
 
+def run_live(ai: AIEngine, args: argparse.Namespace) -> int:
+    # Start camera (prefer project Camera so ROI/exposure settings match app)
+    if getattr(config, "USE_DUMMY_CAMERA", False) or args.dummy:
+        cam = DummyCamera(width=config.CAMERA_WIDTH, height=config.CAMERA_HEIGHT)
+    else:
+        cam = Camera(
+            camera_id=args.camera_id,
+            width=config.CAMERA_WIDTH,
+            height=config.CAMERA_HEIGHT,
+            fps=config.CAMERA_FPS,
+            exposure=getattr(config, "CAMERA_EXPOSURE", -4),
+            auto_exposure=getattr(config, "CAMERA_AUTO_EXPOSURE", False),
+        )
+
+    if not cam.start():
+        print("[TEST] Failed to start real camera, falling back to DummyCamera.")
+        cam = DummyCamera(width=config.CAMERA_WIDTH, height=config.CAMERA_HEIGHT)
+        cam.start()
+
+    print("[TEST] Live mode started. Keys: q=quit, s=save current annotated frame")
+    if args.save_annotated:
+        os.makedirs(args.save_annotated, exist_ok=True)
+
+    last = None
+    last_result: Optional[dict] = None
+    times: List[float] = []
+    frame_idx = 0
+
+    try:
+        while True:
+            frame = cam.read_frame()
+            if frame is None:
+                time.sleep(0.01)
+                continue
+
+            frame_idx += 1
+            do_infer = (args.every <= 1) or (frame_idx % args.every == 0)
+            if do_infer:
+                start = time.time()
+                last_result = ai.predict(frame)
+                ms = (time.time() - start) * 1000.0
+                last_result["__ms"] = ms
+                times.append(ms)
+
+                if args.print_each:
+                    print(
+                        f"[LIVE] {frame_idx} | {last_result.get('result')} | "
+                        f"{last_result.get('reason')} | {ms:.1f}ms"
+                    )
+
+            if last_result and last_result.get("annotated_image") is not None:
+                last = last_result["annotated_image"]
+            else:
+                last = frame
+
+            # Overlay quick stats
+            if last_result:
+                ms = float(last_result.get("__ms", 0.0))
+                txt = f"{last_result.get('result')} | {ms:.1f}ms"
+                cv2.putText(last, txt, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 255), 2)
+
+            cv2.imshow("LIVE (press q to quit)", last)
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord("q"):
+                break
+            if key == ord("s") and args.save_annotated:
+                ts = int(time.time() * 1000)
+                out_path = os.path.join(args.save_annotated, f"live_{ts}.jpg")
+                cv2.imwrite(out_path, last)
+                print(f"[TEST] Saved: {out_path}")
+
+        if times:
+            print("\n[LIVE] Timing summary (ms):")
+            print(f"  mean:   {statistics.mean(times):.1f}")
+            print(f"  median: {statistics.median(times):.1f}")
+            print(f"  p95:    {percentile(times, 0.95):.1f}")
+
+        return 0
+    finally:
+        try:
+            cam.stop()
+        except Exception:
+            pass
+        try:
+            cv2.destroyAllWindows()
+        except Exception:
+            pass
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Batch test NCNN YOLO model on a folder of images.")
+    parser.add_argument("--live", action="store_true", help="Run live camera inference instead of folder batch.")
+    parser.add_argument("--camera-id", type=int, default=getattr(config, "CAMERA_ID", 0), help="Camera ID for live mode.")
+    parser.add_argument("--every", type=int, default=1, help="Infer every N frames in live mode (default 1).")
+    parser.add_argument("--print-each", action="store_true", help="Print one line per inference in live mode.")
+    parser.add_argument("--dummy", action="store_true", help="Force DummyCamera in live mode.")
     parser.add_argument(
         "--images",
         default="captures",
@@ -73,6 +168,11 @@ def main() -> int:
     if args.no_roi:
         setattr(config, "ENABLE_ROI_CROP", False)
 
+    ai = AIEngine(model_path=config.MODEL_PATH, config=config)
+
+    if args.live:
+        return run_live(ai, args)
+
     img_paths = collect_images(args.images)
     if not img_paths:
         print(f"[TEST] No images found under: {args.images}")
@@ -83,8 +183,6 @@ def main() -> int:
 
     if args.save_annotated:
         os.makedirs(args.save_annotated, exist_ok=True)
-
-    ai = AIEngine(model_path=config.MODEL_PATH, config=config)
 
     # Warmup (use first image)
     warm_img = cv2.imread(img_paths[0])
